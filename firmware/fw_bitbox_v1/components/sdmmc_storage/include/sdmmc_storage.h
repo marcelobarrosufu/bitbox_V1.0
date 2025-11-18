@@ -11,7 +11,7 @@
 #define FILE_PATH_0 MOUNT_POINT"/buff0.txt"
 #define FILE_PATH_1 MOUNT_POINT"/buff1.txt"
 
-void sdmmc_stor_init(void);
+bool sdmmc_stor_init(void);
 
 bool sdmmc_stor_record_data_txt(const void *p_data, size_t size, const char *file_name);
 

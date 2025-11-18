@@ -80,17 +80,17 @@ static bool sdmmc_mount_device(void)
     return true;
 }
 
-void sdmmc_stor_init(void)
+bool sdmmc_stor_init(void)
 {
     sdmmc_cfg_host();
     if(!sdmmc_mount_device())
     {
         ESP_LOGE(TAG, "Erro ao montar device SDMMC!");
-        return;
+        return false;
     }
       
     ESP_LOGI(TAG, "SDMMC montado com sucesso!");
-    
+    return true;
 }
 
 bool sdmmc_stor_record_data_txt(const void *p_data, size_t size, const char *file_name)
@@ -132,4 +132,3 @@ bool sdmmc_stor_record_data_bin(const void *p_data, size_t size, const char *fil
 
     return true;
 }
-

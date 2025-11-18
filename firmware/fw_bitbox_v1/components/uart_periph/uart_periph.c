@@ -1,16 +1,24 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include "freertos/idf_additions.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/uart.h"
+
 #include "uart_periph.h"
 #include "sdmmc_storage.h"
+#include "main_app.h"
 
 #include "portmacro.h"
 #include "utl_cbf.h"
 
 #define STRINGFY(x) #x
+
+#define PREDEFINED_SIZE 5000
 
 UTL_CBF_DECLARE(uart_rx_buff_0, RX_BUFFER_SIZE);
 UTL_CBF_DECLARE(uart_rx_buff_1, RX_BUFFER_SIZE);
@@ -19,13 +27,30 @@ static const char *TAG = "UART_PERIPH";
 
 static QueueHandle_t uart_queue;
 
-typedef enum uart_buff_e
+typedef struct 
+{
+    const char *file_name; // file_name deve conter apenas o nome do arquivo, sem "/" e sem extensão ".txt ou .bin"
+    SemaphoreHandle_t semaphore_full_buff;
+}save_data_params_t;
+
+typedef enum
 {
     UART_BUFFER_0,
     UART_BUFFER_1,
+    MAX_BUFFER_NUMS,
 }uart_buff_t;
 
-static uart_buff_t active_buffer = UART_BUFFER_0;
+save_data_params_t params_buff_0 =
+{
+    .file_name = "BUFF_0",
+};
+
+save_data_params_t params_buff_1 =
+{
+    .file_name = "BUFF_1",
+};
+
+uart_buff_t active_buffer = UART_BUFFER_0;
 
 bool cbf_0_ready_to_fill = true;
 bool cbf_1_ready_to_fill = true;
@@ -46,30 +71,37 @@ static void uart_periph_process_uart_rx(uint8_t c); // uart "cbk"
 
 static size_t uart_periph_get_buf_data(uint8_t *p_buff, size_t size);
 
-static bool uart_periph_record_data_SD(uint8_t *p_buff, size_t size, const char *file_name);
+static void uart_periph_record_data_SD(void *args);
 
 /* ----------  GLOBAL FUNCTIONS SOURCES --------------*/
 
-void uart_periph_driver_init(void)
+bool uart_periph_driver_init(void)
 {   
-    ESP_ERROR_CHECK(uart_param_config(uart_num, &uart_cfg));
+    if(uart_param_config(uart_num, &uart_cfg) != ESP_OK)
+        return false;
 
-    ESP_ERROR_CHECK(uart_set_pin(uart_num, 4, 
-                                 5, UART_PIN_NO_CHANGE, 
-                                 UART_PIN_NO_CHANGE));
+    if(uart_set_pin(uart_num, 4, 5, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK)
+        return false;
 
-    ESP_ERROR_CHECK(uart_driver_install(uart_num, 
-                                    100 *1024, 
-                                    0, 
-                                    20, 
-                                    &uart_queue, 
-                                    0));
-}
+    if(uart_driver_install(uart_num, 100 *1024, 0, 20, &uart_queue, 0) != ESP_OK)
+        return false;
+
+    SemaphoreHandle_t sem_buff_0 = xSemaphoreCreateBinary();
+    SemaphoreHandle_t sem_buff_1 = xSemaphoreCreateBinary();
+
+    params_buff_0.semaphore_full_buff = sem_buff_0;
+    params_buff_1.semaphore_full_buff = sem_buff_1;
+
+    xTaskCreate(uart_periph_record_data_SD, "task_buff_0", 4096, &params_buff_0, 1, NULL);
+    xTaskCreate(uart_periph_record_data_SD, "task_buff_1", 4096, &params_buff_1, 1, NULL);
+
+    return true;
+}   
 
 void uart_periph_driver_task(void *arg)
 {
     uart_event_t event;
-    uint8_t data[256] = {0};
+    uint8_t data[128] = {0};
 
     while (1)
     {
@@ -80,7 +112,7 @@ void uart_periph_driver_task(void *arg)
                 case UART_DATA:
                     int len = uart_read_bytes(uart_num, data, event.size, portMAX_DELAY);
                     for(int idx = 0; idx < len; idx++)
-                        process_uart_rx(data[idx]);
+                        uart_periph_process_uart_rx(data[idx]);
 
                     break;
 
@@ -99,16 +131,22 @@ void uart_periph_driver_task(void *arg)
 
 static size_t uart_periph_get_buf_data(uint8_t *p_buff, size_t size)
 {
-    utl_cbf_t *buff = (active_buffer == UART_NUM_0) ? &uart_rx_buff_1 : &uart_rx_buff_0;
-    
+    utl_cbf_t *buff = (active_buffer == UART_BUFFER_0) ? &uart_rx_buff_1 : &uart_rx_buff_0;
+
+    size_t bytes_to_read = size;
     size_t bytes_written = 0;
+
+    if(bytes_to_read >= utl_cbf_bytes_available(buff))
+        bytes_to_read = utl_cbf_bytes_available(buff);
+
+    bytes_to_read++;
     
-    for(size_t bytes_written = 0; bytes_written < size; bytes_written++)
+    for(bytes_written = 0; bytes_written < bytes_to_read; bytes_written++)
     {
         if(utl_cbf_get(buff, &p_buff[bytes_written]) == UTL_CBF_EMPTY)
         {
             ESP_LOGW(TAG, "Aborting NOW. %d bytes have been written!", bytes_written);
-            (active_buffer == UART_NUM_0) ? (cbf_0_ready_to_fill = true) : (cbf_1_ready_to_fill = true);
+            (active_buffer == UART_BUFFER_0) ? (cbf_0_ready_to_fill = true) : (cbf_1_ready_to_fill = true);
             break;
         }
     }
@@ -119,6 +157,7 @@ static size_t uart_periph_get_buf_data(uint8_t *p_buff, size_t size)
 static void uart_periph_process_uart_rx(uint8_t c)
 {
     utl_cbf_t *buff = (active_buffer == UART_BUFFER_0) ? &uart_rx_buff_0 : &uart_rx_buff_1;
+    save_data_params_t *params = (active_buffer == UART_BUFFER_0) ? &params_buff_0 : &params_buff_1;
 
     if(utl_cbf_put(buff, c) != UTL_CBF_OK)
     {
@@ -138,10 +177,30 @@ static void uart_periph_process_uart_rx(uint8_t c)
             utl_cbf_put(&uart_rx_buff_0, c);
             ESP_LOGI(TAG, "%s cheio, trocando para %s!",STRINGFY(UART_BUFFER_1), STRINGFY(UART_BUFFER_0));
         }
+
+        xSemaphoreGive(params->semaphore_full_buff);
     }
 }
 
-static bool uart_periph_record_data_SD(uint8_t *p_buff, size_t size, const char *file_name)
+static void uart_periph_record_data_SD_task(void *args)
 {
+    save_data_params_t *data_params = (save_data_params_t *)args;
 
+    static uint8_t temp_buff[PREDEFINED_SIZE] = {0};
+
+    while(1)
+    {
+        if(xSemaphoreTake(data_params->semaphore_full_buff, portMAX_DELAY) == pdTRUE)
+        {
+           ESP_LOGI(TAG, "SD Task (Buff %s): Sinal recebido! Gravando dados.", data_params->file_name);
+            
+            size_t bytes_lidos = uart_periph_get_buf_data(temp_buff, PREDEFINED_SIZE);
+            
+            if (bytes_lidos > 0)
+            {
+                sdmmc_stor_record_data_txt(temp_buff, bytes_lidos, data_params->file_name);
+                ESP_LOGI(TAG, "SD Task (Buff %s): Gravado %d bytes.", data_params->file_name, bytes_lidos);
+            } 
+        }
+    }
 }
