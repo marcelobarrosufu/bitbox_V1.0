@@ -27,12 +27,6 @@ static const char *TAG = "UART_PERIPH";
 
 static QueueHandle_t uart_queue;
 
-typedef struct 
-{
-    const char *file_name; // file_name deve conter apenas o nome do arquivo, sem "/" e sem extensão ".txt ou .bin"
-    SemaphoreHandle_t semaphore_full_buff;
-}save_data_params_t;
-
 typedef enum
 {
     UART_BUFFER_0,
@@ -40,14 +34,23 @@ typedef enum
     MAX_BUFFER_NUMS,
 }uart_buff_t;
 
+typedef struct 
+{
+    const char *file_name; // file_name deve conter o nome do arquivo com "/" e sem extensão ".txt ou .bin"
+    uart_buff_t uart_buffer;
+    SemaphoreHandle_t semaphore_full_buff;
+}save_data_params_t;
+
 save_data_params_t params_buff_0 =
 {
-    .file_name = "BUFF_0",
+    .file_name = "/BUFF_0",
+    .uart_buffer = UART_BUFFER_0,
 };
 
 save_data_params_t params_buff_1 =
 {
-    .file_name = "BUFF_1",
+    .file_name = "/BUFF_1",
+    .uart_buffer = UART_BUFFER_1,
 };
 
 uart_buff_t active_buffer = UART_BUFFER_0;
@@ -71,7 +74,13 @@ static void uart_periph_process_uart_rx(uint8_t c); // uart "cbk"
 
 static size_t uart_periph_get_buf_data(uint8_t *p_buff, size_t size);
 
-static void uart_periph_record_data_SD(void *args);
+static void uart_periph_record_data_SD_task(void *args);
+
+static void uart_periph_driver_task(void *args);
+
+static void uart_periph_check_bytes_available(void *args);
+
+// static void uart_periph_check_bytes_available(void *args);
 
 /* ----------  GLOBAL FUNCTIONS SOURCES --------------*/
 
@@ -80,11 +89,17 @@ bool uart_periph_driver_init(void)
     if(uart_param_config(uart_num, &uart_cfg) != ESP_OK)
         return false;
 
+    ESP_LOGI(TAG, "Parâmetros da UART setados com sucesso!");
+
     if(uart_set_pin(uart_num, 4, 5, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE) != ESP_OK)
         return false;
+    
+    ESP_LOGI(TAG, "Hardware da UART setado com sucesso!");    
 
-    if(uart_driver_install(uart_num, 100 *1024, 0, 20, &uart_queue, 0) != ESP_OK)
+    if(uart_driver_install(uart_num, 1024, 0, 20, &uart_queue, 0) != ESP_OK)
         return false;
+
+    ESP_LOGI(TAG, "Driver da UART instalado com sucesso!");  
 
     SemaphoreHandle_t sem_buff_0 = xSemaphoreCreateBinary();
     SemaphoreHandle_t sem_buff_1 = xSemaphoreCreateBinary();
@@ -92,13 +107,14 @@ bool uart_periph_driver_init(void)
     params_buff_0.semaphore_full_buff = sem_buff_0;
     params_buff_1.semaphore_full_buff = sem_buff_1;
 
-    xTaskCreate(uart_periph_record_data_SD, "task_buff_0", 4096, &params_buff_0, 1, NULL);
-    xTaskCreate(uart_periph_record_data_SD, "task_buff_1", 4096, &params_buff_1, 1, NULL);
+    xTaskCreate(uart_periph_driver_task, "main_uart_task", 4096, NULL, 5, NULL);
+    xTaskCreate(uart_periph_record_data_SD_task, "task_buff_0", 4096, &params_buff_0, 1, NULL);
+    xTaskCreate(uart_periph_record_data_SD_task, "task_buff_1", 4096, &params_buff_1, 2, NULL);
 
     return true;
 }   
 
-void uart_periph_driver_task(void *arg)
+static void uart_periph_driver_task(void *arg)
 {
     uart_event_t event;
     uint8_t data[128] = {0};
@@ -165,20 +181,43 @@ static void uart_periph_process_uart_rx(uint8_t c)
         {
             cbf_0_ready_to_fill = false;
             cbf_1_ready_to_fill = true;
+
             active_buffer = UART_BUFFER_1;
             utl_cbf_put(&uart_rx_buff_1, c);
+
             ESP_LOGI(TAG, "%s cheio, trocando para %s!",STRINGFY(UART_BUFFER_0), STRINGFY(UART_BUFFER_1));
+            xTaskCreate(uart_periph_check_bytes_available, "task_check_bytes_0", 2000, &params_buff_0, 5, NULL);
         }
         else
         {
             cbf_0_ready_to_fill = true;
             cbf_1_ready_to_fill = false;
+
             active_buffer = UART_BUFFER_0;
             utl_cbf_put(&uart_rx_buff_0, c);
+
             ESP_LOGI(TAG, "%s cheio, trocando para %s!",STRINGFY(UART_BUFFER_1), STRINGFY(UART_BUFFER_0));
+            xTaskCreate(uart_periph_check_bytes_available, "task_check_bytes_1", 2000, &params_buff_1, 5, NULL);
         }
 
         xSemaphoreGive(params->semaphore_full_buff);
+    }
+}
+
+static void uart_periph_check_bytes_available(void *args)
+{
+    save_data_params_t *data_params = (save_data_params_t *)args;
+    static utl_cbf_t *p_cbf[MAX_BUFFER_NUMS] = {&uart_rx_buff_0, &uart_rx_buff_1};
+
+    while (1)
+    {
+        if(utl_cbf_bytes_available(p_cbf[data_params->uart_buffer]))
+            xSemaphoreGive(data_params->semaphore_full_buff);
+
+        else
+            vTaskDelete(NULL);
+
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 

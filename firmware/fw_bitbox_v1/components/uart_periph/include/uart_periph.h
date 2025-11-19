@@ -4,5 +4,3 @@
 #define TX_BUFFER_SIZE RX_BUFFER_SIZE
 
 bool uart_periph_driver_init(void);
-
-void uart_periph_driver_task(void *arg);

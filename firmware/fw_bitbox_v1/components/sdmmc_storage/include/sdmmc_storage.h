@@ -8,8 +8,6 @@
 #define SDMMC_D3_PIN     GPIO_NUM_12
 
 #define MOUNT_POINT "/sdcard"
-#define FILE_PATH_0 MOUNT_POINT"/buff0.txt"
-#define FILE_PATH_1 MOUNT_POINT"/buff1.txt"
 
 bool sdmmc_stor_init(void);
 

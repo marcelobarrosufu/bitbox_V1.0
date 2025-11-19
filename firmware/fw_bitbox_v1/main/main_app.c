@@ -6,7 +6,6 @@
 
 #include <stdint.h>
 #include <inttypes.h>
-#include <stdio.h>
 #include <stdbool.h>
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
