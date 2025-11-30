@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include "esp_log.h"
 #include "app_config.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "cJSON.h"
 #include "portmacro.h"
 
@@ -24,6 +26,7 @@ static void config_task(void *param)
         if(xQueueReceive(config_queue, &msg, portMAX_DELAY))
         {
             ESP_LOGI(TAG, "Recebido no arquivo config: %.*s", msg.size, msg.data);
+            
         }
 
         free(msg.data);
