@@ -37,11 +37,10 @@ jobs:
           name: firmware
           path: firmware/fw_bitbox_v1/build
 
-
       - name: Upload to GitHub Release
-          uses: softprops/action-gh-release@v2
-          if: startsWith(github.ref, 'refs/tags/')
-          with:
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
           files: |
             build/*.bin
             build/**/*.bin
