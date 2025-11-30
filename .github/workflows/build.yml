@@ -13,10 +13,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install ESP-IDF
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: release-v5.5
-          command: export
+        run: |
+          git clone -b master --recursive https://github.com/espressif/esp-idf.git $HOME/esp-idf
+          $HOME/esp-idf/install.sh
 
       - name: Build Project
         working-directory: firmware/fw_bitbox_v1
