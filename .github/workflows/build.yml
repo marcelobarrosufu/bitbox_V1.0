@@ -20,7 +20,9 @@ jobs:
 
       - name: Build Project
         working-directory: firmware/fw_bitbox_v1
-        run: idf.py build
+        run: |
+           . $HOME/esp-idf/export.sh
+           idf.py build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
