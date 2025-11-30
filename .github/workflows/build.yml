@@ -18,10 +18,11 @@ jobs:
           esp_idf_version: release-v5.5
 
       - name: Build Project
+        working-directory: firmware/fw_bitbox_v1
         run: idf.py build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: build/*.bin
+          path: firmware/fw_bitbox_v1/build/*.bin
