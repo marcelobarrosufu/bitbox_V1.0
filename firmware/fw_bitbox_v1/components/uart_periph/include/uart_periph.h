@@ -1,6 +1,8 @@
 #pragma once
 
 #include "hal/uart_types.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 
 #define RX_BUFFER_SIZE 1000
 #define TX_BUFFER_SIZE RX_BUFFER_SIZE
@@ -11,6 +13,7 @@ typedef struct uart_cfg_s
     int rx_pin;
     int tx_pin;
     int baudrate;
+    bool state; // false = disable | true = enable
 }uart_cfg_t;
 
 extern QueueHandle_t uart_queue[UART_NUM_MAX];

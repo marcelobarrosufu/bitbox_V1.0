@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_system.h"
+#include "app_config.h"
 
 #include "sdmmc_storage.h"
 #include "uart_periph.h"
@@ -34,16 +35,15 @@ static void app_init_periph(void);
 
 static void app_init_periph(void)
 {
+
     sdmmc_initialized = sdmmc_stor_init();
     uart_periph_initialized = uart_periph_driver_init();
 
     esp_err_t ret = nvs_flash_init();
-    if(ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) 
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
+    ret = nvs_flash_init();
     ESP_ERROR_CHECK(ret);
+
+    app_config_main();
 
     wifi_conn_init();
     embled_app_main();

@@ -5,7 +5,6 @@
 #include "mqtt_client.h"
 
 #include "cJSON.h"
-#include "app_config.h"
 #include "esp_log.h"
 #include "uart_periph.h"
 #include "esp_system.h"
@@ -54,8 +53,6 @@ static void mqtt_topic_filter(const char *topic, const char *payload)
 
 static void handle_config_message_func(const char *suffix, const char *payload)
 {
-    ESP_LOGI(TAG, "Sufixo: %s| Dado: %s", suffix, payload);
-
     uart_cfg_t config;
     parse_uart_json(payload, &config);
 
@@ -99,8 +96,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
         case MQTT_EVENT_SUBSCRIBED:
             ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
-            msg_id = esp_mqtt_client_publish(client, "topic/config", "AA FOLOU A FOLOU IU", 0, 0, 0);
-            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
             break;
 
         case MQTT_EVENT_UNSUBSCRIBED:
@@ -114,16 +109,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         case MQTT_EVENT_DATA:    
             ESP_LOGI(TAG, "MQTT_EVENT_DATA");
 
-            ESP_LOGI(TAG, "TOPIC=[%.*s]\r\n", event->topic_len, event->topic);
-            ESP_LOGI(TAG, "DATA=%s | SIZE = %d\r\n", event->data, event->data_len);
-
             char topic[128];
             char data[256];
 
             snprintf(topic, sizeof(topic), "%.*s", event->topic_len, event->topic);
             snprintf(data, sizeof(data), "%.*s", event->data_len, event->data);
-
-            mqtt_msg_t msg;
 
             mqtt_topic_filter(topic, data);
 
@@ -166,6 +156,7 @@ static bool parse_uart_json(const char *json, uart_cfg_t *cfg)
     if(!root)
         return false;
 
+    cfg->state = cJSON_GetObjectItem(root, "state")->valueint;
     cfg->uart_num = cJSON_GetObjectItem(root, "uart_num")->valueint;
     cfg->tx_pin = cJSON_GetObjectItem(root, "tx_gpio")->valueint;
     cfg->rx_pin = cJSON_GetObjectItem(root, "rx_gpio")->valueint;

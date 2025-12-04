@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include "esp_system.h"
 #include "freertos/idf_additions.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -9,6 +10,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/uart.h"
+#include "app_config.h"
 
 #include "uart_periph.h"
 #include "sdmmc_storage.h"
@@ -76,6 +78,8 @@ static void uart_periph_record_data_SD_task(void *args);
 static void uart_periph_driver_task(void *args);
 
 static void uart_periph_check_bytes_available(void *args);
+
+static uint8_t uart_periph_get_actives(void);
 
 // static void uart_periph_check_bytes_available(void *args);
 
@@ -232,12 +236,27 @@ static void uart_periph_record_data_SD_task(void *args)
 
 void uart_set_new_configure(uart_cfg_t *cfg)
 {
+    uint8_t pos = cfg->uart_num;
+    sys_config_t sys_cfg = 
+    {
+        .uart_cnt = uart_periph_get_actives(),
+        .uarts[0] = *cfg,
+    };
+
+    app_config_save(&sys_cfg);
+
+    if(!cfg->state)
+    {
+        uart_driver_delete(cfg->uart_num);
+        ESP_LOGI(TAG, "UART %d desabilitada!\nTX: GPIO%d | RX: GPIO%d livres!", cfg->uart_num, cfg->tx_pin, cfg->rx_pin);
+        uart_installeds[cfg->uart_num] = false;
+        return;
+    }
+
     if(uart_installeds[cfg->uart_num])
     {
-        vTaskDelete(uart_task_handlers[cfg->uart_num]);
-        uart_task_handlers[cfg->uart_num] = NULL;
-
-        uart_driver_delete(cfg->uart_num);
+        ESP_LOGW(TAG, "UART%d ja instalada!", cfg->uart_num);
+        return;
     }
 
     uart_config_t uart_config =
@@ -270,4 +289,16 @@ void uart_set_new_configure(uart_cfg_t *cfg)
     xTaskCreate(uart_periph_driver_task, "main_uart_task", 4000, (void*)cfg->uart_num, 5, &uart_task_handlers[cfg->uart_num]);
 
     uart_installeds[cfg->uart_num] = true;
+}
+
+static uint8_t uart_periph_get_actives(void)
+{
+    uint8_t active = 0;
+    for(uint8_t i = 0; i < UART_NUM_MAX; i++)
+    {
+        if(uart_installeds[i])
+            active++;
+    }
+
+    return active;
 }

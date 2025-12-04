@@ -1,16 +1,21 @@
 #pragma once
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
+#define STORAGE_NAMESPACE "storage"
+#define CONFIG_KEY        "sys_cfg"
 
-typedef struct mqtt_msg_s
+#include "hal/uart_types.h"
+#include "uart_periph.h"
+#include "esp_err.h"
+
+typedef struct sys_config_s
 {
-    char *data;
-    int size;
-}mqtt_msg_t;
+    uint8_t uart_cnt;
+    uart_cfg_t uarts[UART_NUM_MAX];
+}sys_config_t; 
 
-extern QueueHandle_t config_queue; // Fila de Configuração
-// extern QueueHandle_t cmd_queue;    // Fila de Comandos Rápidos (GPIO)
-// extern QueueHandle_t ota_queue;    // Fila de Atualização de Firmware
+esp_err_t app_config_save(const sys_config_t *cfg);
 
-void app_config_init();
+esp_err_t app_config_load(sys_config_t *cfg);
+
+void app_config_main(void);
+
