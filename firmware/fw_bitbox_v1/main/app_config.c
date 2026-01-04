@@ -13,7 +13,113 @@
 
 static const char *TAG = "APP_CONFIG";
 
-esp_err_t app_config_save(const sys_config_t *cfg)
+#define X(IDX, PERIPH_CFG, ST_PERIPH, CFG_VAR, NAMESPACE, FUNC_PROT) const char *CFG_VAR##_namespace = NAMESPACE;
+    XMACRO_SYS_CONFIG
+#undef X
+
+esp_err_t app_config_load(sys_config_t *cfg)
+{
+    nvs_handle_t nvs_handler;
+    esp_err_t err;
+    uint8_t type;
+    size_t size;
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao abrir configuração anterior!");
+        return err;
+    }
+
+    err = nvs_get_u8(nvs_handler, CONFIG_TYPE_KEY, &type);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao ler tipo de configuração!");
+        return err;
+    }
+
+    cfg->cfg_type = (sys_config_type_t)type;
+
+    switch (cfg->cfg_type)
+    {
+        case UART_CFG:
+            size = sizeof(sys_config_uart_t);
+            err = nvs_get_blob(nvs_handler, CONFIG_DATA_KEY, &cfg->uart_cfg, &size);
+            if(err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Erro ao ler configuração da UART!");
+                return err;
+            }
+        break;
+
+        case GPIO_CFG:
+            size = sizeof(sys_config_gpio_t);
+            err = nvs_get_blob(nvs_handler, CONFIG_DATA_KEY, &cfg->gpio_cfg, &size);
+            if(err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Erro ao ler configuração da GPIO!");
+                return err;
+            }
+        break;
+        
+        default:
+            ESP_LOGE(TAG, "Configuração não suportada!");
+            err = ESP_ERR_INVALID_ARG;
+            return err;
+    }
+    
+    nvs_close(nvs_handler);
+    return err;
+}
+
+void app_config_uart_load(sys_config_uart_t *uart_cfg)
+{
+    nvs_handle_t nvs_handler;
+    esp_err_t err;
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao abrir configuração anterior!");
+        return err;
+    }
+
+    err = nvs_get_blob(nvs_handler, uart_cfg_namespace, uart_cfg, sizeof(sys_config_uart_t));
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao ler configuração da UART!");
+        return err;
+    }
+ 
+    nvs_close(nvs_handler);
+    return err;
+}
+
+void app_config_gpio_load(sys_config_gpio_t *gpio_cfg)
+{
+    nvs_handle_t nvs_handler;
+    esp_err_t err;
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao abrir configuração anterior!");
+        return err;
+    }
+
+    err = nvs_get_blob(nvs_handler, gpio_cfg_namespace, gpio_cfg, sizeof(sys_config_gpio_t));
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao ler configuração da UART!");
+        return err;
+    }
+ 
+    nvs_close(nvs_handler);
+    return err;
+}
+
+
+void app_config_uart_save(const sys_config_uart_t *uart_cfg)
 {
     nvs_handle_t nvs_handler;
     esp_err_t err;
@@ -25,10 +131,10 @@ esp_err_t app_config_save(const sys_config_t *cfg)
         return err;
     }
 
-    err = nvs_set_blob(nvs_handler, CONFIG_KEY, cfg, sizeof(sys_config_t));
+    err = nvs_set_blob(nvs_handler, uart_cfg_namespace, uart_cfg, sizeof(sys_config_uart_t));
     if(err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Erro ao setar blob!");
+        ESP_LOGE(TAG, "Erro ao salvar configurações de UART!");
         return err;
     }
 
@@ -43,42 +149,72 @@ esp_err_t app_config_save(const sys_config_t *cfg)
     return err;
 }
 
-esp_err_t app_config_load(sys_config_t *cfg)
+void app_config_gpio_save(const sys_config_gpio_t *gpio_cfg)
 {
     nvs_handle_t nvs_handler;
     esp_err_t err;
 
-    size_t size = sizeof(sys_config_t);
-
-    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvs_handler);
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handler);
     if(err != ESP_OK)
     {
-        ESP_LOGE(TAG, "Erro ao abrir configuração anterior!");
+        ESP_LOGE(TAG, "Erro ao abrir nvs para salvar configuração!");
         return err;
     }
 
-    err = nvs_get_blob(nvs_handler, CONFIG_KEY, cfg, &size);
-    
+    err = nvs_set_blob(nvs_handler, gpio_cfg_namespace, gpio_cfg, sizeof(sys_config_gpio_t));
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao salvar configurações de UART!");
+        return err;
+    }
+
+    err = nvs_commit(nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao commitar!");
+        return err;
+    }
+
     nvs_close(nvs_handler);
     return err;
 }
 
 void app_config_main(void)
 {
-    ESP_LOGI(TAG, "Procurando por atualizações anteriores!");
+    ESP_LOGI(TAG, "Carregando configurações salvas...");
 
-    sys_config_t current_cfg = {0};
-    esp_err_t err = app_config_load(&current_cfg);
-    if(err != ESP_OK)
+    sys_config_uart_t uart_cfg = {0};
+    sys_config_gpio_t gpio_cfg = {0};
+
+    /* ---------- UART ---------- */
+    app_config_uart_load(&uart_cfg);
+
+    ESP_LOGI(TAG, "Configurações de UART carregadas: %d UART(s)", uart_cfg.uart_cnt);
+
+    for (uint8_t i = 0; i < uart_cfg.uart_cnt && i < UART_NUM_MAX; i++)
     {
-        ESP_LOGE(TAG, "Erro ao abrir configuração anterior!");
-        return;
+        if (uart_cfg.uarts[i].state)
+        {
+            ESP_LOGI(TAG, "Inicializando UART%d", uart_cfg.uarts[i].uart_num);
+            uart_set_new_configure(&uart_cfg.uarts[i]);
+        }
     }
-    
-    for(uint8_t uart_pos = 0; uart_pos < UART_NUM_MAX; uart_pos++)
+
+    /* ---------- GPIO ---------- */
+    app_config_gpio_load(&gpio_cfg);
+
+    ESP_LOGI(TAG, "Configurações de GPIO carregadas: %d GPIO(s)", gpio_cfg.gpio_cnt);
+
+    for (uint8_t i = 0; i < gpio_cfg.gpio_cnt && i < GPIO_BOARD_MAX; i++)
     {
-        if(current_cfg.uarts[uart_pos].state)
-            uart_set_new_configure(&current_cfg.uarts[uart_pos]);
+        if (gpio_cfg.gpios[i].state)
+        {
+            ESP_LOGI(TAG, "Inicializando GPIO%d", gpio_cfg.gpios[i].gpio_num);
+            gpio_set_new_configure(&gpio_cfg.gpios[i]);
+        }
     }
+
+    ESP_LOGI(TAG, "Configuracoes aplicadas com sucesso!");
 }
+
 

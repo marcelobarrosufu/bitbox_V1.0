@@ -51,6 +51,8 @@ bool sd_log_uart_data(sd_log_uart_t *msg)
         return false;
     }
 
+    ESP_LOGI(TAG, "Mensagem gravada com sucesso!");
+
     return true;
 }
 

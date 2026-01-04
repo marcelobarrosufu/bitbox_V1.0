@@ -75,7 +75,7 @@ static void uart_periph_driver_task(void *arg)
     ESP_LOGI(TAG, "TASK da UART%d iniciada!", uart_num);
 
     uart_event_t event;
-    uint8_t data[500] = {0};
+    uint8_t *data = (uint8_t *)pvPortMalloc(2000);
     uint32_t written = 0;
 
     while (1)
@@ -128,7 +128,7 @@ static void uart_record_data_task(void *arg)
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
