@@ -15,6 +15,7 @@
 
 #include "uart_periph.h"
 #include "gpio_peripheral.h"
+#include "mqtt_app.h"
 #include "sd_log.h"
 
 #include "portmacro.h"
@@ -64,7 +65,7 @@ void uart_set_new_configure(uart_cfg_t *cfg)
     static bool record_task_created = false;
     if (!record_task_created)
     {
-        xTaskCreate(uart_record_data_task, "record_data_task", 3000, NULL, 4, NULL);
+        xTaskCreate(uart_record_data_task, "record_data_task", 4096, NULL, 4, NULL);
         record_task_created = true;
     }
 }
@@ -106,32 +107,52 @@ static void uart_periph_driver_task(void *arg)
 
 static void uart_record_data_task(void *arg)
 {
+    static uint8_t uart_byte;
+    static sd_log_msg_t uart_raw_data[UART_NUM_MAX] = { 0 };
+
     while (1)
     {
-        for(uart_port_t uart_num = UART_NUM_0; uart_num < UART_NUM_MAX; uart_num++)
+        for (uart_port_t uart_num = UART_NUM_0; uart_num < UART_NUM_MAX; uart_num++)
         {
-            if(uart_installeds[uart_num])
+            if (!uart_installeds[uart_num])
+                continue;
+
+            sd_log_msg_t *ctx = &uart_raw_data[uart_num];
+
+            while (utl_cbf_bytes_available(uart_circ_buffers[uart_num]))
             {
-                uint32_t bytes_available = utl_cbf_bytes_available(uart_circ_buffers[uart_num]);
-                if(bytes_available >= UART_MAX_PAYLOAD_LEN)
+                utl_cbf_get(uart_circ_buffers[uart_num], &uart_byte);
+
+                if (uart_byte != 0x00)
                 {
-                    sd_log_uart_t uart_msg;
+                    if (ctx->uart.payload_len < UART_MAX_PAYLOAD_LEN)
+                    {
+                        ctx->uart.payload[ctx->uart.payload_len++] = uart_byte;
+                    }
+                    else
+                    {
+                        ctx->uart.payload_len = 0;
+                    }
+                }
+                else
+                {
+                    if (ctx->uart.payload_len > 0)
+                    {
+                        ctx->log_header.header     = LOG_PACKET_HEADER_INIT;
+                        ctx->log_header.time_us    = esp_timer_get_time();
+                        ctx->log_header.log_type   = SD_LOG_UART;
+                        ctx->log_header.periph_num = uart_num;
 
-                    uart_msg.LOG_PACKET_HEADER_INIT;
-                    uart_msg.time_us = esp_timer_get_time();
-                    uart_msg.log_type = SD_LOG_UART;
-                    uart_msg.periph_num = uart_num;
-
-                    uint32_t len = 0;
-                    utl_cbf_get_n(uart_circ_buffers[uart_num], uart_msg.msg_data, UART_MAX_PAYLOAD_LEN, &len);
-                    uart_msg.msg_len = (uint16_t)len;
-
-                    sd_log_uart_data(&uart_msg);
+                        sd_log_data(ctx);
+                        mqtt_publish_msg(ctx);
+                        
+                        ctx->uart.payload_len = 0;
+                    }
                 }
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 

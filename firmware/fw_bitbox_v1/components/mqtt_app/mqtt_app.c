@@ -2,21 +2,49 @@
 #include <stdio.h>
 #include <string.h>
 #include "mqtt_app.h"
+#include "esp_timer.h"
+
 #include "mqtt_client.h"
 
 #include "cJSON.h"
 #include "esp_log.h"
 #include "uart_periph.h"
 #include "gpio_peripheral.h"
+
+#include "sd_log.h"
+
+#include "embled_app.h"
+
 #include "esp_system.h"
+
+#define DEVICE_ID 1
 
 #define MQTT_BROKER_URL "mqtts://qa717179.ala.us-east-1.emqxsl.com"
 #define MQTT_BROKER_PORT 8883
 
+static int embl_app_pins[PORT_MAX_LEDS] =
+{
+    GPIO_NUM_17, GPIO_NUM_18,
+};
+
 extern const uint8_t server_cert_start[] asm("_binary_emqxsl_ca_crt_start");
 extern const uint8_t server_cert_end[]   asm("_binary_emqxsl_ca_crt_end");
 
+static esp_mqtt_client_handle_t mqtt_client = NULL;
+
+typedef struct PACKED mqtt_msg_s
+{
+    uint64_t time_us;
+    union
+    {
+        sd_log_uart_t uart;
+        sd_log_gpio_t gpio;
+    };
+} mqtt_msg_t;
+
 static const char *TAG = "MQTT";
+
+static bool mqtt_connected = false;
 
 /* ----------- STATIC FUNCTION DECLARATIONS --------------*/
 
@@ -56,7 +84,6 @@ static void mqtt_topic_filter(const char *topic, const char *payload)
         }
     }
 }
-
 
 static void handle_config_message_func(const char *suffix, const char *payload)
 {
@@ -109,6 +136,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+            mqtt_connected = true;
             
             for(uint8_t i = 0; i < MAX_TOPICS; i++)
             {
@@ -118,6 +146,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
 
         case MQTT_EVENT_DISCONNECTED:
+            mqtt_connected = false;
+
             ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
             break;
 
@@ -173,10 +203,75 @@ void mqtt_main_app(void)
         .credentials.authentication.password = "papagaio23",
     };
     
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
 
-    esp_mqtt_client_start(client);
+    esp_mqtt_client_start(mqtt_client);
+}
+
+bool mqtt_publish_msg(const sd_log_msg_t *msg)
+{
+    if (!msg)
+    {
+        return false;
+    }
+
+    char topic[64];
+    uint8_t payload[8 + UART_MAX_PAYLOAD_LEN + 1];
+    size_t payload_len = 0;
+
+    switch (msg->log_header.log_type)
+    {
+        /* ================= UART ================= */
+        case SD_LOG_UART:
+        {
+            snprintf(topic, sizeof(topic), "datalogger/uart/%d", msg->log_header.periph_num);
+
+            uint8_t *p = payload;
+
+            memcpy(p, &msg->log_header.time_us, sizeof(uint64_t));
+            p += sizeof(uint64_t);
+
+            memcpy(p, msg->uart.payload, msg->uart.payload_len);
+            p += msg->uart.payload_len;
+
+            *p++ = '\0';
+
+            payload_len = p - payload;
+
+            esp_mqtt_client_publish(mqtt_client, topic, (const char *)payload, payload_len, 0, 0);
+
+            embled_set_mode(embl_app_pins[PORT_STATUS], EMBLED_DRIVER_MODE_DIGITAL, EMBLED_MODE_PULSE_TRIPLE, EMBLED_ACTIVE_HIGH, false);
+
+            return true;
+        }
+
+        /* ================= GPIO ================= */
+        case SD_LOG_GPIO:
+        {
+            snprintf(topic, sizeof(topic), "datalogger/gpio/%d" , msg->log_header.periph_num);
+
+            uint8_t *p = payload;
+
+            memcpy(p, &msg->log_header.time_us, sizeof(uint64_t));
+            p += sizeof(uint64_t);
+
+            *p++ = msg->gpio.edge;
+            *p++ = msg->gpio.level;
+
+            payload_len = p - payload;
+
+            esp_mqtt_client_publish(mqtt_client, topic,(const char *)payload,payload_len,1,0);
+
+            embled_set_mode(embl_app_pins[PORT_OPER], EMBLED_DRIVER_MODE_DIGITAL, EMBLED_MODE_PULSE_DOUBLE, EMBLED_ACTIVE_HIGH, false);
+
+            return true;
+        }
+
+        default:
+            ESP_LOGW(TAG, "Tipo de log não suportado");
+            return false;
+    }
 }
 
 static bool parse_uart_json(const char *json, uart_cfg_t *cfg)

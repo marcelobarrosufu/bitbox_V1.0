@@ -49,7 +49,6 @@ static void app_init_periph(void)
 
     app_config_main();
     wifi_conn_init();
-    sd_log_main();
 
     embled_app_main();
     mqtt_main_app();

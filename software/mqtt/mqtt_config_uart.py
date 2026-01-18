@@ -14,7 +14,7 @@ CA_CERT_PATH = "emqxsl-ca.crt"
 # --- MENSAGENS A SEREM PUBLICADAS ---
 messages = [
     {
-        "state": 0,
+        "state": 1,
         "uart_num": 0,
         "rx_gpio": 1,
         "tx_gpio": 2,
@@ -30,8 +30,8 @@ messages = [
     {
         "state": 1,
         "uart_num": 2,
-        "rx_gpio": 33,
-        "tx_gpio": 34,
+        "rx_gpio": 34,
+        "tx_gpio": 33,
         "baudrate": 115200
     }
 ]

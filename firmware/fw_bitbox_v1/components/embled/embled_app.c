@@ -20,29 +20,17 @@
 #define CHANNEL_A      LEDC_CHANNEL_0
 #define CHANNEL_B      LEDC_CHANNEL_1
 
-static const char *TAG = "EMBLED";
-
-typedef enum port_pinout_e
-{
-    PORT_STATUS,
-    PORT_OPER,
-    PORT_MAX_LEDS,
-}port_pinout_t;
-
 static int embl_app_pins[PORT_MAX_LEDS] =
 {
     GPIO_NUM_17, GPIO_NUM_18,
 };
 
+static const char *TAG = "EMBLED";
+
 static int8_t profile_id;
 
 static TimerHandle_t led_tmr_handler;
 static StaticTimer_t led_tmr_buffer;
-
-static TaskHandle_t app_led_handle;
-static StaticTask_t app_led_buffer;
-
-static StackType_t app_led_stack[128];
 
 /* ---------- STATIC FUNCTIONS PROTOTYPES ------------*/
 
@@ -94,8 +82,8 @@ static void embled_app_init(void)
         xTimerStart(led_tmr_handler, 0);
     }
 
-    ESP_LOGI(TAG, "STATUS LED APP: %d", embled_set_mode(embl_app_pins[PORT_STATUS], EMBLED_DRIVER_MODE_DIGITAL, EMBLED_MODE_BLINK_SLOW, EMBLED_ACTIVE_HIGH, false));
-    ESP_LOGI(TAG, "OPER LED APP:   %d", embled_set_mode(embl_app_pins[PORT_OPER]  , EMBLED_DRIVER_MODE_DIGITAL, EMBLED_MODE_BLINK_FAST, EMBLED_ACTIVE_HIGH, false));
+    // ESP_LOGI(TAG, "STATUS LED APP: %d", embled_set_mode(embl_app_pins[PORT_STATUS], EMBLED_DRIVER_MODE_DIGITAL, EMBLED_MODE_BLINK_SLOW, EMBLED_ACTIVE_HIGH, false));
+    // ESP_LOGI(TAG, "OPER LED APP:   %d", embled_set_mode(embl_app_pins[PORT_OPER]  , EMBLED_DRIVER_MODE_DIGITAL, EMBLED_MODE_BLINK_FAST, EMBLED_ACTIVE_HIGH, false));
 }
 
 static void embled_gpio_conf(void)

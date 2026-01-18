@@ -16,112 +16,67 @@
 
 #define SD_LOG_QUEUE_DEPTH 64
 
-static QueueHandle_t sd_log_queue;
-
 static const char *TAG = "SD_LOG";
 
-bool sd_log_uart_data(sd_log_uart_t *msg)
+bool sd_log_data(const sd_log_msg_t *msg)
 {
-    if(!msg || !sd_log_queue)
+    if(!msg)
     {
-        ESP_LOGE(TAG, "Mensagem incompleta ou fila não inválida!");
         return false;
     }
 
-    sd_log_msg_t log = { 0 };
-
-    log.type = SD_LOG_UART;
-
-    log.uart.header = msg->header; 
-    log.uart.time_us = msg->time_us;
-    log.uart.log_type = msg->log_type;
-    log.uart.periph_num = msg->periph_num;
-    log.uart.msg_len = msg->msg_len;
-
-    if(log.uart.msg_len > UART_MAX_PAYLOAD_LEN)
-    {   
-        ESP_LOGW(TAG, "Tamanho máximo de mensagem ultrapassado!");
-        log.uart.msg_len = UART_MAX_PAYLOAD_LEN;
-    }
-
-    memcpy(log.uart.msg_data, msg->msg_data, log.uart.msg_len);
-
-    if(xQueueSend(sd_log_queue, &log, 0) != pdTRUE)
+    const sd_log_msg_t *record_data = msg;
+    
+    switch(record_data->log_header.log_type)
     {
-        ESP_LOGE(TAG, "Erro ao enviar token de fila!");
-        return false;
-    }
+        case SD_LOG_UART:
 
-    ESP_LOGI(TAG, "Mensagem gravada com sucesso!");
-
-    return true;
-}
-
-bool sd_log_gpio_data(sd_log_gpio_t *msg)
-{
-    if(!msg || !sd_log_queue)
-    {
-        ESP_LOGE(TAG, "Mensagem incompleta ou fila não inválida!");
-        return false;
-    }
-
-    sd_log_msg_t log = { 0 };
-
-    log.type = SD_LOG_GPIO;
-
-    log.gpio.header = msg->header;
-    log.gpio.time_us = msg->time_us;
-    log.gpio.type = msg->type;
-    log.gpio.periph_num = msg->periph_num;
-    log.gpio.edge = msg->edge;
-    log.gpio.level = msg->level;
-
-    if(xQueueSend(sd_log_queue, &log, 0) != pdTRUE)
-    {
-        ESP_LOGE(TAG, "Erro ao enviar token de fila!");
-        return false;
-    }
-
-    return true;
-}
-
-static void sd_log_task(void *arg)
-{
-    sd_log_msg_t msg;
-
-    while(1)
-    {
-        if(xQueueReceive(sd_log_queue, &msg, pdMS_TO_TICKS(2000)) == pdTRUE)
-        {
-            switch (msg.type)
+            if (record_data->uart.payload_len > UART_MAX_PAYLOAD_LEN)
             {
-                case SD_LOG_UART:
-                    sdmmc_stor_record_data_bin(&msg.uart, sizeof(msg.uart));
-                    ESP_LOGI(TAG, "%d bytes gravados pela UART%d!", msg.uart.msg_len, msg.uart.periph_num);
-                    break;
-
-                case SD_LOG_GPIO:
-                    sdmmc_stor_record_data_bin(&msg.gpio, sizeof(msg.gpio));
-                    ESP_LOGI(TAG, "Estado do GPIO%d gravado com sucesso!", msg.gpio.periph_num);
-                    break;
-                
-                default:
-                    ESP_LOGE(TAG, "Tipo de log desconhecido!");
-                    break;
+                ESP_LOGE(TAG, "Payload UART inválido: %u", record_data->uart.payload_len);
+                return false;
             }
-        }
+            
+            if(!sdmmc_stor_record_data_bin(&record_data->log_header, sizeof(record_data->log_header)))
+            {
+                return false;
+            }
 
-        else
-        {
-            ESP_LOGI(TAG, "Esperando dados!");
-        }
+            if(!sdmmc_stor_record_data_bin(&record_data->uart.payload_len, sizeof(record_data->uart.payload_len)))
+            {
+                return false;
+            }
 
-        vTaskDelay(pdMS_TO_TICKS(200));
+            if(!sdmmc_stor_record_data_bin(record_data->uart.payload,record_data->uart.payload_len))
+            {
+                return false;
+            }
+
+            ESP_LOGI(TAG, "%d bytes da UART%d gravados!", record_data->uart.payload_len, record_data->log_header.periph_num);
+
+            return true;
+
+        case SD_LOG_GPIO:
+
+            if(!sdmmc_stor_record_data_bin(&record_data->log_header, sizeof(record_data->log_header)))
+            {
+                return false;
+            }
+
+            if(!sdmmc_stor_record_data_bin(&record_data->gpio, sizeof(record_data->gpio)))
+            {
+                return false;
+            }
+
+            ESP_LOGI(TAG, "Estado do GPIO%d: %d! Gravado!", record_data->log_header.periph_num, record_data->gpio.level);
+
+            return true;
+
+        default:
+
+            ESP_LOGW(TAG, "Tipo de log não suportado!");
+
+            return false;
     }
 }
 
-void sd_log_main(void)
-{
-    sd_log_queue = xQueueCreate(SD_LOG_QUEUE_DEPTH, sizeof(sd_log_msg_t));
-    xTaskCreate(sd_log_task, "log_task", 4096, NULL, 9, NULL);
-}

@@ -15,6 +15,7 @@
 #include "hal/gpio_types.h"
 
 #include "sd_log.h"
+#include "mqtt_app.h"
 #include "uart_periph.h"
 #include "app_config.h"
 
@@ -84,6 +85,12 @@ static void gpio_apply_config(const gpio_cfg_t *cfg)
 
             gpio_installeds[cfg->gpio_num] = false;
             ESP_LOGI(TAG, "GPIO%d desabilitado!", gpio_pins[cfg->gpio_num]);
+            return;
+        }
+
+        else
+        {
+            ESP_LOGI(TAG, "GPIO%d já está desabilitado!", gpio_pins[cfg->gpio_num]);
             return;
         }
     }
@@ -181,16 +188,18 @@ static void gpio_log_task(void *args)
 
             ESP_LOGI(TAG, "GPIO%d | level=%d | t=%lld us", gpio, evt.level, now);
 
-            sd_log_gpio_t gpio_msg = {0};
+            sd_log_msg_t gpio_msg = {0};
 
-            gpio_msg.LOG_PACKET_HEADER_INIT;
-            gpio_msg.time_us    = now;
-            gpio_msg.type       = SD_LOG_GPIO;
-            gpio_msg.periph_num = gpio;
-            gpio_msg.edge       = evt.level;
-            gpio_msg.level      = evt.level;
+            gpio_msg.log_header.header = LOG_PACKET_HEADER_INIT;
+            gpio_msg.log_header.time_us = now;
+            gpio_msg.log_header.log_type = SD_LOG_GPIO;
+            gpio_msg.log_header.periph_num = gpio;
 
-            sd_log_gpio_data(&gpio_msg);
+            gpio_msg.gpio.edge = evt.level;
+            gpio_msg.gpio.level = evt.level;
+
+            sd_log_data(&gpio_msg);
+            mqtt_publish_msg(&gpio_msg);
         }
     }
 }

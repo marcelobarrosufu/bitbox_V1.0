@@ -2,7 +2,7 @@
 
 #define PACKED __attribute__((packed))
 
-#define LOG_PACKET_HEADER_INIT header = 0xdeadbeef
+#define LOG_PACKET_HEADER_INIT 0xdeadbeef
 
 #define UART_MAX_PAYLOAD_LEN 1024
 
@@ -42,29 +42,29 @@ typedef enum sd_log_gpio_num_e
     SD_LOG_GPIO_NONE,
 } sd_log_gpio_num_t;
 
-typedef struct PACKED sd_log_uart_s
+typedef struct PACKED sd_log_hdr_s
 {
     uint32_t header;
     uint64_t time_us;
     uint8_t log_type;
     uint8_t periph_num;
-    uint16_t msg_len;
-    uint8_t msg_data[UART_MAX_PAYLOAD_LEN];
+} sd_log_hdr_t;
+
+typedef struct PACKED sd_log_uart_s
+{
+    uint16_t payload_len;
+    uint8_t payload[UART_MAX_PAYLOAD_LEN];
 } sd_log_uart_t;
 
 typedef struct PACKED sd_log_gpio_s
 {
-    uint32_t header;
-    uint64_t time_us;
-    uint8_t type;
-    uint8_t periph_num;
     uint8_t edge;
     uint8_t level;
 } sd_log_gpio_t;
 
 typedef struct PACKED sd_log_msg_s
 {
-    sd_log_type_t type;
+    sd_log_hdr_t log_header;
     union
     {
         sd_log_uart_t uart;
@@ -72,9 +72,6 @@ typedef struct PACKED sd_log_msg_s
     };
 } sd_log_msg_t;
 
+bool sd_log_data(const sd_log_msg_t *msg);
 
-bool sd_log_uart_data(sd_log_uart_t *msg);
 
-bool sd_log_gpio_data(sd_log_gpio_t *msg);
-
-void sd_log_main(void);
