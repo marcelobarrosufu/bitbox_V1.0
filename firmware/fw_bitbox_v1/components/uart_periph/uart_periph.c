@@ -13,9 +13,9 @@
 
 #include "esp_timer.h"
 
+#include "mqtt_app.h"
 #include "uart_periph.h"
 #include "gpio_peripheral.h"
-#include "mqtt_app.h"
 #include "sd_log.h"
 
 #include "portmacro.h"
@@ -215,6 +215,7 @@ static void uart_apply_config(const uart_cfg_t *cfg)
 
     uart_driver_install(cfg->uart_num, 1024, 0, 20,
                         &uart_queue[cfg->uart_num], 0);
+                        
 
     xTaskCreate(uart_periph_driver_task, "uart_rx_task",
                 4000, (void *)cfg->uart_num, 5,

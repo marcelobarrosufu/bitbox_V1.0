@@ -1,7 +1,7 @@
 import struct
 
-INPUT_FILE = "decoded/uart0.bin"
-OUTPUT_FILE = "decoded/uart0.txt"
+INPUT_FILE = "decoded/uart2.bin"
+OUTPUT_FILE = "decoded/uart2.txt"
 
 TS_FMT = "<Q"
 TS_SIZE = struct.calcsize(TS_FMT)

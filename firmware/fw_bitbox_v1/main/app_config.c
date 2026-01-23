@@ -71,6 +71,55 @@ esp_err_t app_config_gpio_load(sys_config_gpio_t *gpio_cfg)
     return err;
 }
 
+esp_err_t app_config_netw_load(sys_config_netw_t *netw_cfg)
+{
+    nvs_handle_t nvs_handler;
+    esp_err_t err;
+
+    size_t size = sizeof(sys_config_netw_t);
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao abri configuração de rede anterior!");
+        return err;
+    }
+
+    err = nvs_get_blob(nvs_handler, netw_cfg_namespace, netw_cfg, &size);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao setar configuração de rede anterior!");
+        return err;
+    }
+
+    nvs_close(nvs_handler);
+    return err;
+}
+
+esp_err_t app_config_netw_save(const sys_config_netw_t *netw_cfg)
+{
+    nvs_handle_t nvs_handler;
+    esp_err_t err;
+
+    size_t size = sizeof(sys_config_netw_t);
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao abrir nvs para salvar configuração!");
+        return err;
+    }
+
+    err = nvs_set_blob(nvs_handler, netw_cfg_namespace, netw_cfg, size);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao salvar configurações de rede!");
+        return err;   
+    }
+
+    nvs_close(nvs_handler);
+    return err;
+}   
 
 esp_err_t app_config_uart_save(const sys_config_uart_t *uart_cfg)
 {
@@ -170,6 +219,9 @@ void app_config_main(void)
             gpio_set_new_configure(&gpio_cfg.gpios[i]);
         }
     }
+
+
+    
 
     ESP_LOGI(TAG, "Configuracoes aplicadas com sucesso!");
 }

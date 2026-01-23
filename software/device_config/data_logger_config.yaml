@@ -24,7 +24,6 @@
 # - Evite usar o mesmo GPIO como GPIO e UART ao mesmo tempo.
 # ============================================================
 
-
 gpio:
   - gpio: 34
     state: 0
@@ -48,7 +47,7 @@ gpio:
     pulldown: ENABLE
 
   - gpio: 37
-    state: 0
+    state: 1
     mode: INPUT
     intr: ANYEDGE
     pullup: DISABLE
@@ -62,13 +61,13 @@ uart:
     baudrate: 115200
 
   - uart_num: 1
-    state: 0
+    state: 1
     rx_gpio: 3
     tx_gpio: 4
     baudrate: 115200
 
   - uart_num: 2
-    state: 0
+    state: 1
     rx_gpio: 5
     tx_gpio: 33
     baudrate: 115200

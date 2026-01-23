@@ -48,6 +48,7 @@ static void app_init_periph(void)
     ESP_ERROR_CHECK(ret);
 
     app_config_main();
+
     wifi_conn_init();
 
     embled_app_main();

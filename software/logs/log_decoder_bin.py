@@ -3,7 +3,7 @@ import os
 
 # ========= CONFIG =========
 
-INPUT_FILE = "LOG17.BIN"
+INPUT_FILE = "LOG1.BIN"
 OUTPUT_DIR = "decoded"
 
 HEADER_MAGIC = 0xDEADBEEF

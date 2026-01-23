@@ -1,4 +1,0 @@
-[00000] 67322873 us | edge=1 level=1
-[00001] 67580393 us | edge=0 level=0
-[00002] 79557542 us | edge=1 level=1
-[00003] 79695422 us | edge=0 level=0
