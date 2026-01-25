@@ -14,6 +14,7 @@
 #include "driver/gpio.h"
 
 #include "wifi_conn.h"
+#include "esp_timer.h"
 
 #include "esp_http_server.h"
 #include "app_config.h"
@@ -24,7 +25,7 @@
 #include "lwip/udp.h"
 #include "lwip/dns.h"
 
-#define BUTTON_DEBOUNCE_MS 200
+#define BUTTON_DEBOUNCE_MS 300
 
 #define GPIO_SEL_CFG GPIO_NUM_41
 
@@ -45,10 +46,17 @@ typedef struct
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
+#define PORTAL_TIMEOUT_MS   (1 * 60 * 1000) // 5 minutos
+
+static esp_timer_handle_t portal_timer = NULL;
+
 static const char *TAG = "WIFI_CONN";
 
 static bool wifi_init_done = false;
 static bool portal_running = false;
+
+static httpd_handle_t http_server = NULL;
+static esp_netif_t *wifi_ap_netif = NULL;
 
 static const char *html_page =
 "<!DOCTYPE html>"
@@ -199,10 +207,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 static void http_server_start(void);
 static void dns_recv_cb(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 static void wifi_dns_start(void);
+static void wifi_dns_stop(void);
 static void wifi_init_ap(void);
 static void url_decode_inplace(char *str);
 static void config_button_init(void);
 static void config_button_isr(void *arg);
+static void portal_timeout_cb(void *arg);
 
 static void config_button_init(void)
 {
@@ -215,6 +225,51 @@ static void config_button_init(void)
     };
 
     gpio_config(&btn_cfg);
+}
+
+static void portal_timeout_cb(void *arg)
+{
+    ESP_LOGW(TAG, "Timeout do captive portal");
+
+    wifi_dns_stop();
+
+    esp_restart();
+
+    esp_wifi_stop();
+
+    portal_running = false;
+}
+
+static void start_portal_timeout(void)
+{
+    esp_err_t err;
+
+    if (portal_timer == NULL)
+    {
+        const esp_timer_create_args_t timer_args =
+        {
+            .callback = &portal_timeout_cb,
+            .name = "portal_timeout"
+        };
+
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &portal_timer));
+    }
+
+    err = esp_timer_stop(portal_timer);
+
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE)
+    {
+        ESP_LOGE(TAG, "Erro ao parar timer: %s", esp_err_to_name(err));
+    }
+
+    if (wifi_ap_netif) 
+    {
+        esp_netif_destroy(wifi_ap_netif);
+        wifi_ap_netif = NULL;
+    }
+
+
+    ESP_ERROR_CHECK(esp_timer_start_once(portal_timer, PORTAL_TIMEOUT_MS * 1000));
 }
 
 static void IRAM_ATTR config_button_isr(void *arg)
@@ -242,7 +297,7 @@ static void config_task(void *arg)
 
             TickType_t now = xTaskGetTickCount();
 
-            if ((now - last_button_tick) < pdMS_TO_TICKS(300)) 
+            if ((now - last_button_tick) < pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS)) 
             {
                 continue;
             }
@@ -255,10 +310,10 @@ static void config_task(void *arg)
                 continue;
             }
 
-            portal_running = true;
-
             ESP_LOGI(TAG, "Botão válido, abrindo portal");
             wifi_start_captive_portal();
+
+            portal_running = true;
         }
     }
 }
@@ -310,9 +365,6 @@ static esp_err_t captive_get_handler(httpd_req_t *req)
 static void wifi_conn_init_sta(wifi_config_t *cfg)
 {
     wifi_event_group  = xEventGroupCreate();
-
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
     
     esp_netif_create_default_wifi_sta();
 
@@ -413,9 +465,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 static void http_server_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    httpd_handle_t server;
 
-    httpd_start(&server, &config);
+    if(http_server)
+    {
+        httpd_stop(http_server);
+        http_server = NULL;
+    }
+
+    httpd_start(&http_server, &config);
 
     for (int i = 0; i < sizeof(portal_uris)/sizeof(portal_uris[0]); i++)
     {
@@ -426,7 +483,7 @@ static void http_server_start(void)
             .handler = captive_get_handler
         };
 
-        httpd_register_uri_handler(server, &uri);
+        httpd_register_uri_handler(http_server, &uri);
     }
 
     httpd_uri_t save = 
@@ -436,7 +493,7 @@ static void http_server_start(void)
         .handler = save_post_handler
     };
 
-    httpd_register_uri_handler(server, &save);
+    httpd_register_uri_handler(http_server, &save);
 }
 
 static void dns_recv_cb(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
@@ -487,22 +544,29 @@ static void wifi_dns_start(void)
     udp_recv(dns_pcb, dns_recv_cb, NULL);
 }
 
+static void wifi_dns_stop(void)
+{
+    if(dns_pcb)
+    {
+        udp_remove(dns_pcb);
+        dns_pcb = NULL;
+    }
+}
+
 static void wifi_init_ap(void)
 {
-    if(!wifi_init_done)
-    {
-        ESP_ERROR_CHECK(esp_netif_init());
-        ESP_ERROR_CHECK(esp_event_loop_create_default());
-        esp_netif_create_default_wifi_ap();
-    }
-    else
-    {   
-        esp_wifi_stop();
-    }
+    esp_wifi_stop();
 
-    wifi_config_t wifi_ap_cfg = 
+    esp_netif_destroy_default_wifi(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"));
+
+    if (wifi_ap_netif == NULL) 
     {
-        .ap = 
+        wifi_ap_netif = esp_netif_create_default_wifi_ap();
+    }   
+
+    wifi_config_t wifi_ap_cfg =
+    {
+        .ap =
         {
             .ssid = "BITBOX_POLENTA_E_DROGA",
             .ssid_len = strlen("BITBOX_POLENTA_E_DROGA"),
@@ -512,27 +576,48 @@ static void wifi_init_ap(void)
         }
     };
 
-    esp_wifi_set_mode(WIFI_MODE_AP);
-    esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_cfg);
-    esp_wifi_start();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_cfg));
+    ESP_ERROR_CHECK(esp_wifi_start());
 }
 
 void wifi_start_captive_portal(void)
 {
     ESP_LOGI(TAG, "Iniciando captive portal");
+
     mqtt_deinit_app();
+
+    wifi_dns_stop();
+
+    if (http_server)
+    {
+        httpd_stop(http_server);
+        http_server = NULL;
+    }
+
+    esp_wifi_stop();
+
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     wifi_init_ap();
     wifi_dns_start();
     http_server_start();
 
+    portal_running = true;
+
+    start_portal_timeout();
+
     ESP_LOGI(TAG, "Captive portal ativo em http://192.168.4.1");
 }
+
 
 void wifi_conn_init(void)
 {
     config_button_init();
     xTaskCreate(config_task, "config_task", 4096, NULL, 10, &config_task_handle);
+
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     gpio_install_isr_service(0);
     gpio_isr_handler_add(GPIO_SEL_CFG, config_button_isr, NULL);
@@ -556,7 +641,7 @@ void wifi_conn_init(void)
     wifi_config_t wifi_cfg = { 0 };
 
     memcpy(wifi_cfg.sta.ssid, netw_cfg.ssid, strlen(netw_cfg.ssid));
-    memcpy(wifi_cfg.sta.password, netw_cfg.pass, strlen(netw_cfg.ssid));
+    memcpy(wifi_cfg.sta.password, netw_cfg.pass, strlen(netw_cfg.pass));
 
     ESP_LOGI(TAG, "Inicializando Wi-Fi STA...");
     wifi_conn_init_sta(&wifi_cfg);
