@@ -219,10 +219,7 @@ void app_config_main(void)
             gpio_set_new_configure(&gpio_cfg.gpios[i]);
         }
     }
-
-
     
-
     ESP_LOGI(TAG, "Configuracoes aplicadas com sucesso!");
 }
 

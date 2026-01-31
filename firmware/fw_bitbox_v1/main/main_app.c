@@ -49,10 +49,18 @@ static void app_init_periph(void)
 
     app_config_main();
 
-    wifi_conn_init();
+    if(wifi_conn_init())
+    {
+        ESP_LOGI(TAG, "Rede conectada! Partindo para o funcionamento online e offline!");
+        mqtt_main_app();
+        embled_app_main();
+    }
 
-    embled_app_main();
-    mqtt_main_app();
+    else
+    {
+        ESP_LOGI(TAG, "Falha ao conectar na rede! Partindo para o funcionamento offline!");
+        embled_app_main(); 
+    }
 }
 
 /* --------- FUNCTION SOURCE ------------------------*/
