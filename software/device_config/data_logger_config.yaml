@@ -25,7 +25,7 @@
 # ============================================================
 
 gpio:
-  - gpio: 34
+  - gpio: 3
     state: 1
     mode: OUTPUT
     intr: DISABLE
@@ -67,7 +67,7 @@ uart:
     baudrate: 115200
 
   - uart_num: 2
-    state: 0
+    state: 1
     rx_gpio: 5
     tx_gpio: 33
     baudrate: 115200

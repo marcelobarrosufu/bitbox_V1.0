@@ -825,8 +825,8 @@ static void wifi_init_ap(void)
     {
         .ap = 
         {
-            .ssid = "BITBOX_POLENTA_E_DROGA",
-            .ssid_len = (uint8_t)strlen("BITBOX_POLENTA_E_DROGA"),
+            .ssid = "DEADBEEF_BitBoxV1_CFG",
+            .ssid_len = (uint8_t)strlen("DEADBEEF_BitBoxV1_CFG"),
             .max_connection = 4,
             .authmode = WIFI_AUTH_OPEN,
         },
