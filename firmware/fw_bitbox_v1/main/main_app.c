@@ -47,6 +47,8 @@ static void app_init_periph(void)
     esp_err_t ret = nvs_flash_init();
     ESP_ERROR_CHECK(ret);
 
+    gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+
     app_config_main();
 
     if(wifi_conn_init())

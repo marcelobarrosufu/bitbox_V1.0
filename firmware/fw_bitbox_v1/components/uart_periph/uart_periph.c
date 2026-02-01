@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -13,6 +14,7 @@
 
 #include "esp_timer.h"
 
+#include "hal/uart_types.h"
 #include "mqtt_app.h"
 #include "uart_periph.h"
 #include "gpio_peripheral.h"
@@ -22,6 +24,12 @@
 #include "utl_cbf.h"
 
 #include "app_config.h"
+
+#define UART_FRAME_TIMEOUT_US 2000000
+#define UART_POLL_INTERVAL_MS 50 // checagem de timeout
+
+static int64_t last_rx_time[UART_NUM_MAX] = { 0 };
+static bool has_pending_data[UART_NUM_MAX] = { false };
 
 static const char *TAG = "UART_PERIPH";
 
@@ -36,7 +44,7 @@ static utl_cbf_t *uart_circ_buffers[UART_NUM_MAX] =
     &uart2_cbf
 };
 
-static bool uart_installeds[UART_NUM_MAX] =
+bool uart_installeds[UART_NUM_MAX] =
 {
     false, false, false,
 };
@@ -75,7 +83,6 @@ void uart_set_new_configure(uart_cfg_t *cfg)
 static void uart_periph_driver_task(void *arg)
 {
     int uart_num = (int)arg;
-
     ESP_LOGI(TAG, "TASK da UART%d iniciada!", uart_num);
 
     uart_event_t event;
@@ -90,18 +97,51 @@ static void uart_periph_driver_task(void *arg)
             {
                 case UART_DATA:
                     int len = uart_read_bytes(uart_num, data, event.size, portMAX_DELAY);
-                    utl_cbf_put_n(uart_circ_buffers[uart_num], data, len, &written);
+                    if(len > 0)
+                    {
+                        utl_cbf_put_n(uart_circ_buffers[uart_num], data, len, &written);
 
+                        last_rx_time[uart_num] = esp_timer_get_time();
+                        has_pending_data[uart_num] = true;
+                    }
+                    
                     break;
 
+                case UART_FIFO_OVF:
                 case UART_BUFFER_FULL:
                     uart_flush_input(uart_num);
                     xQueueReset(uart_queue[uart_num]);
+                    ESP_LOGW(TAG, "UART%d Buffer Full/Overflow", uart_num);
+                
+                    break;
                 
                 default:
                     break;
             }
         }
+    }
+}
+
+static void process_uart_packet(uart_port_t uart_num, sd_log_msg_t *ctx)
+{
+    if (ctx->uart.payload_len > 0)
+    {
+        ctx->log_header.header     = LOG_PACKET_HEADER_INIT;
+
+        ctx->log_header.time_us    = esp_timer_get_time(); 
+        ctx->log_header.log_type   = SD_LOG_UART;
+        ctx->log_header.periph_num = uart_num;
+
+        if(ctx->uart.payload_len < UART_MAX_PAYLOAD_LEN) 
+        {
+            ctx->uart.payload[ctx->uart.payload_len] = 0; 
+        }
+
+        sd_log_data(ctx);
+        mqtt_publish_msg(ctx);
+        
+        ctx->uart.payload_len = 0;
+        has_pending_data[uart_num] = false;
     }
 }
 
@@ -112,11 +152,15 @@ static void uart_record_data_task(void *arg)
 
     while (1)
     {
+        int64_t now = esp_timer_get_time();
+
         for (uart_port_t uart_num = UART_NUM_0; uart_num < UART_NUM_MAX; uart_num++)
         {
             if (!uart_installeds[uart_num])
+            {
                 continue;
-
+            }
+                
             sd_log_msg_t *ctx = &uart_raw_data[uart_num];
 
             while (utl_cbf_bytes_available(uart_circ_buffers[uart_num]))
@@ -129,30 +173,31 @@ static void uart_record_data_task(void *arg)
                     {
                         ctx->uart.payload[ctx->uart.payload_len++] = uart_byte;
                     }
+
                     else
                     {
-                        ctx->uart.payload_len = 0;
+                        process_uart_packet(uart_num, ctx);
+
+                        ctx->uart.payload[ctx->uart.payload_len++] = uart_byte;
                     }
                 }
+
                 else
                 {
-                    if (ctx->uart.payload_len > 0)
-                    {
-                        ctx->log_header.header     = LOG_PACKET_HEADER_INIT;
-                        ctx->log_header.time_us    = esp_timer_get_time();
-                        ctx->log_header.log_type   = SD_LOG_UART;
-                        ctx->log_header.periph_num = uart_num;
+                    process_uart_packet(uart_num, ctx);
+                }
+            }
 
-                        sd_log_data(ctx);
-                        mqtt_publish_msg(ctx);
-                        
-                        ctx->uart.payload_len = 0;
-                    }
+            if ((has_pending_data[uart_num]) && (ctx->uart.payload_len > 0))
+            {
+                if ((now - last_rx_time[uart_num]) > UART_FRAME_TIMEOUT_US)
+                {
+                    process_uart_packet(uart_num, ctx);
                 }
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(UART_POLL_INTERVAL_MS));
     }
 }
 
@@ -184,19 +229,24 @@ static void uart_apply_config(const uart_cfg_t *cfg)
         if (uart_installeds[cfg->uart_num])
         {
             uart_driver_delete(cfg->uart_num);
-            vTaskDelete(uart_task_handlers[cfg->uart_num]);
 
-            uart_task_handlers[cfg->uart_num] = NULL;
+            if (uart_task_handlers[cfg->uart_num] != NULL)
+            {
+                vTaskDelete(uart_task_handlers[cfg->uart_num]);
+                uart_task_handlers[cfg->uart_num] = NULL;
+            }
+
             uart_installeds[cfg->uart_num] = false;
-
             ESP_LOGI(TAG, "UART%d desabilitada", cfg->uart_num);
         }
+
         return;
     }
 
     if (uart_installeds[cfg->uart_num])
     {
         ESP_LOGW(TAG, "UART%d já instalada", cfg->uart_num);
+
         return;
     }
 
@@ -207,23 +257,25 @@ static void uart_apply_config(const uart_cfg_t *cfg)
         .stop_bits = UART_STOP_BITS_1,
         .parity    = UART_PARITY_DISABLE,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
     };
 
     uart_param_config(cfg->uart_num, &uart_config);
-    uart_set_pin(cfg->uart_num, cfg->tx_pin, cfg->rx_pin,
-                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-
-    uart_driver_install(cfg->uart_num, 1024, 0, 20,
-                        &uart_queue[cfg->uart_num], 0);
+    uart_set_pin(cfg->uart_num, cfg->tx_pin, cfg->rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_driver_install(cfg->uart_num, 1024, 0, 20, &uart_queue[cfg->uart_num], 0);
                         
+    has_pending_data[cfg->uart_num] = false;
+    last_rx_time[cfg->uart_num] = esp_timer_get_time();
 
-    xTaskCreate(uart_periph_driver_task, "uart_rx_task",
-                4000, (void *)cfg->uart_num, 5,
-                &uart_task_handlers[cfg->uart_num]);
+    xTaskCreate(uart_periph_driver_task, "uart_rx_task",4000, (void *)cfg->uart_num, 5, &uart_task_handlers[cfg->uart_num]);
 
     ESP_LOGI(TAG, "UART%d instalada! Tx: GPIO%d | Rx: GPIO%d a %dbps", cfg->uart_num, cfg->tx_pin, cfg->rx_pin, cfg->baudrate);
-
     uart_installeds[cfg->uart_num] = true;
+}
+
+int uart_periph_write_data(int uart_num, const void *src, size_t size)
+{   
+    return(uart_write_bytes(uart_num, src, size));
 }
 
 bool uart_periph_driver_init(void)

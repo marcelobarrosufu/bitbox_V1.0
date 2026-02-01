@@ -30,6 +30,11 @@ static int embl_app_pins[PORT_MAX_LEDS] =
 extern const uint8_t server_cert_start[] asm("_binary_emqxsl_ca_crt_start");
 extern const uint8_t server_cert_end[]   asm("_binary_emqxsl_ca_crt_end");
 
+extern const int gpio_pins[GPIO_BOARD_MAX];
+extern bool gpio_installeds[GPIO_BOARD_MAX];
+extern bool uart_installeds[UART_NUM_MAX];
+
+
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 
 typedef struct PACKED mqtt_msg_s
@@ -58,7 +63,11 @@ static void mqtt_topic_filter(const char *topic, const char *payload);
 
 static bool parse_uart_json(const char *json, uart_cfg_t *cfg);
 
+static bool parse_cmd_uart_json(const char *json, int *uart_num, char **msg);
+
 static bool parse_gpio_json(const char *json, gpio_cfg_t *cfg);
+
+static bool parse_cmd_gpio_json(const char *json, int *idx, int *level);
 
 /* ----------- TOPIC HANDLERS DECLARATIONS --------------*/
 
@@ -113,6 +122,55 @@ static void handle_config_message_func(const char *suffix, const char *payload)
     }
 }
 
+// Parser para: {"pin_index": 0, "level": 1}
+static bool parse_cmd_gpio_json(const char *json, int *idx, int *level)
+{
+    cJSON *root = cJSON_Parse(json);
+    if (!root)
+    {
+        return false;
+    }
+
+    cJSON *item_idx = cJSON_GetObjectItem(root, "pin_index");
+    cJSON *item_lvl = cJSON_GetObjectItem(root, "level");
+
+    if (cJSON_IsNumber(item_idx) && cJSON_IsNumber(item_lvl)) 
+    {
+        *idx = item_idx->valueint;
+        *level = item_lvl->valueint;
+        cJSON_Delete(root);
+        return true;
+    }
+    
+    cJSON_Delete(root);
+    return false;
+}
+
+// Parser para: {"uart_num": 1, "msg": "Ola Mundo"}
+static bool parse_cmd_uart_json(const char *json, int *uart_num, char **msg)
+{
+    cJSON *root = cJSON_Parse(json);
+    if (!root) 
+    {
+        return false;
+    }
+
+    cJSON *item_num = cJSON_GetObjectItem(root, "uart_num");
+    cJSON *item_msg = cJSON_GetObjectItem(root, "msg");
+
+    if (cJSON_IsNumber(item_num) && cJSON_IsString(item_msg)) 
+    {
+        *uart_num = item_num->valueint;
+
+        *msg = strdup(item_msg->valuestring); 
+        cJSON_Delete(root);
+        return true;
+    }
+
+    cJSON_Delete(root);
+    return false;
+}
+
 static void handle_ota_message_func(const char *suffix, const char *payload)
 {
     ESP_LOGI(TAG, "Sufixo: %s| Dado: %s", suffix, payload);
@@ -120,7 +178,91 @@ static void handle_ota_message_func(const char *suffix, const char *payload)
 
 static void handle_cmd_message_func(const char *suffix, const char *payload)
 {
-    ESP_LOGI(TAG, "Sufixo: %s| Dado: %s", suffix, payload);
+    ESP_LOGI(TAG, "Comando recebido. Sufixo: %s", suffix);
+
+    // Roteia: datalogger/cmd/gpio
+    if (strcmp(suffix, "/gpio") == 0)
+    {
+        int idx = -1;
+        int level = -1;
+
+        if (parse_cmd_gpio_json(payload, &idx, &level))
+        {
+            if (idx >= 0 && idx < GPIO_BOARD_MAX)
+            {
+                if (gpio_installeds[idx])
+                {
+                    // Converte índice lógico (0..9) para pino físico (ex: 38)
+                    int phy_pin = gpio_pins[idx];
+                    
+                    // Executa o comando
+                    gpio_set_level(phy_pin, level);
+                    
+                    ESP_LOGI(TAG, "CMD GPIO[%d] (Pino %d) -> %d", idx, phy_pin, level);
+                }
+
+                else
+                {
+                    ESP_LOGW(TAG, "CMD FALHA: GPIO[%d] não está habilitado na config.", idx);
+                }
+
+            }
+
+            else
+            {
+                ESP_LOGW(TAG, "CMD FALHA: Índice GPIO inválido (%d)", idx);
+            }
+
+        }
+
+        else
+        {
+            ESP_LOGE(TAG, "CMD FALHA: JSON GPIO inválido");
+        }
+    }
+    // Roteia: datalogger/cmd/uart
+    else if (strcmp(suffix, "/uart") == 0)
+    {
+        int uart_num = -1;
+        char *msg_buffer = NULL;
+
+        if (parse_cmd_uart_json(payload, &uart_num, &msg_buffer))
+        {
+            if (uart_num >= 0 && uart_num < UART_NUM_MAX)
+            {
+                if (uart_installeds[uart_num])
+                {
+                    // Executa o comando
+                    int len = strlen(msg_buffer);
+                    uart_periph_write_data(uart_num, msg_buffer, len);
+                    
+                    ESP_LOGI(TAG, "CMD UART%d enviado: %s", uart_num, msg_buffer);
+                }
+                else
+                {
+                    ESP_LOGW(TAG, "CMD FALHA: UART%d não habilitada.", uart_num);
+                }
+            }
+            else
+            {
+                ESP_LOGW(TAG, "CMD FALHA: Num UART inválido (%d)", uart_num);
+            }
+
+            if (msg_buffer) 
+            {
+                free(msg_buffer);
+            }
+        }
+        else
+        {
+            ESP_LOGE(TAG, "CMD FALHA: JSON UART inválido");
+        }
+    }
+    
+    else
+    {
+        ESP_LOGW(TAG, "Sufixo de comando desconhecido: %s", suffix);
+    }
 }
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
@@ -193,8 +335,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 void mqtt_deinit_app(void)
 {
-    ESP_LOGI(TAG, "Cliente MQTT finializado!");
-    esp_mqtt_client_stop(mqtt_client);
+    if(mqtt_connected)
+    {
+        esp_mqtt_client_stop(mqtt_client);
+        mqtt_connected = false;
+        ESP_LOGI(TAG, "Cliente MQTT finializado!");
+    }
+
 }
 
 void mqtt_main_app(void)

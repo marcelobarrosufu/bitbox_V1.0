@@ -33,8 +33,6 @@ static const int gpio_pins[GPIO_BOARD_MAX] = { 1 , 2, 3, 4, 5, 33, 34, 35, 37, 3
 
 static const char *TAG = "GPIO_PERIPH";
 
-static bool first_run = false;
-
 typedef struct gpio_evt_s
 {
     uint8_t gpio;
@@ -110,15 +108,9 @@ static void gpio_apply_config(const gpio_cfg_t *cfg)
         .pull_up_en = cfg->pull_up_en,
     };
 
-    if(!first_run)
-    {
-        gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-        first_run = true;
-    }
-
     gpio_config(&gpio_cfg);
 
-    gpio_isr_handler_add(gpio_pins[cfg->gpio_num], gpio_isr_handler, (void*)gpio_pins[cfg->gpio_num]);
+    gpio_isr_handler_add(gpio_pins[cfg->gpio_num], gpio_isr_handler, (void*)((uint32_t)cfg->gpio_num));
     
     gpio_installeds[cfg->gpio_num] = true;
 
@@ -150,10 +142,12 @@ static void gpio_config_save_update(const gpio_cfg_t *cfg)
 
 static void IRAM_ATTR gpio_isr_handler(void *args)
 {
-    uint32_t gpio_num = (uint32_t)args; 
+    uint32_t gpio_idx = (uint32_t)args; 
+
+    int gpio_num = gpio_pins[gpio_idx];
 
     gpio_evt_t evt; 
-    evt.gpio = gpio_num; 
+    evt.gpio = gpio_idx; 
     evt.level = gpio_get_level(gpio_num); 
     evt.time_us = esp_timer_get_time();
 
@@ -168,32 +162,37 @@ static void gpio_log_task(void *args)
     {
         if (xQueueReceive(gpio_evt_queue, &evt, portMAX_DELAY))
         {
-            uint32_t gpio = evt.gpio;
+            uint8_t gpio_logic = evt.gpio; // índice lógico do gpio
             uint64_t now  = evt.time_us;
 
-            if (gpio >= GPIO_BOARD_MAX) {
+            if (gpio_logic >= GPIO_BOARD_MAX) 
+            {
                 continue;
             }
 
-            if ((now - last_evt_time[gpio]) < GPIO_DEBOUNCE_US) {
+            if ((now - last_evt_time[gpio_logic]) < GPIO_DEBOUNCE_US) 
+            {
                 continue;  
             }
 
-            if (last_level[gpio] == evt.level) {
+            if (last_level[gpio_logic] == evt.level) 
+            {
                 continue;
             }
 
-            last_evt_time[gpio] = now;
-            last_level[gpio]    = evt.level;
+            last_evt_time[gpio_logic] = now;
+            last_level[gpio_logic]    = evt.level;
 
-            ESP_LOGI(TAG, "GPIO%d | level=%d | t=%lld us", gpio, evt.level, now);
+            int real_pin = gpio_pins[gpio_logic];
+
+            ESP_LOGI(TAG, "GPIO%d | level=%d | t=%lld us", real_pin, evt.level, now);
 
             sd_log_msg_t gpio_msg = {0};
 
             gpio_msg.log_header.header = LOG_PACKET_HEADER_INIT;
             gpio_msg.log_header.time_us = now;
             gpio_msg.log_header.log_type = SD_LOG_GPIO;
-            gpio_msg.log_header.periph_num = gpio;
+            gpio_msg.log_header.periph_num = real_pin;
 
             gpio_msg.gpio.edge = evt.level;
             gpio_msg.gpio.level = evt.level;

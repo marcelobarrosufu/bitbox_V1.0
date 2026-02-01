@@ -20,4 +20,7 @@ extern QueueHandle_t uart_queue[UART_NUM_MAX];
 
 void uart_set_new_configure(uart_cfg_t *cfg);
 
+int uart_periph_write_data(int uart_num, const void *src, size_t size);
+
+
 bool uart_periph_driver_init(void);

@@ -1,7 +1,10 @@
 #include <stdint.h>
 #include <stdlib.h>
+#include "esp_attr.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/queue.h"
 #include "hal/uart_types.h"
 #include "nvs.h"
@@ -13,13 +16,88 @@
 
 #include "app_config.h"
 
+#define GPIO_BTN_RESET GPIO_NUM_0
+
+#define RESET_HOLD_TIME_MS 3000
+
 static const char *TAG = "APP_CONFIG";
 
-static const int gpio_pins[GPIO_BOARD_MAX] = { 1 , 2, 3, 4, 5, 33, 34, 35, 37, 38 };
+const int gpio_pins[GPIO_BOARD_MAX] = { 1 , 2, 3, 4, 5, 33, 34, 35, 37, 38 };
 
 #define X(IDX, PERIPH_CFG, ST_PERIPH, CFG_VAR, NAMESPACE, FUNC_PROT) const char *CFG_VAR##_namespace = NAMESPACE;
     XMACRO_SYS_CONFIG
 #undef X
+
+static TaskHandle_t reset_task_handle = NULL;
+
+static void IRAM_ATTR reset_button_isr(void *arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    if(reset_task_handle != NULL)
+    {
+        xTaskNotifyFromISR(reset_task_handle, 1, eSetBits, &xHigherPriorityTaskWoken);
+    }
+
+    else
+    {
+        portYIELD_FROM_ISR();
+    }
+}
+
+static void reset_button_task(void *arg)
+{
+    uint32_t notify_value;
+    
+    while(1)
+    {
+        xTaskNotifyWait(0, ULONG_MAX, &notify_value, portMAX_DELAY);
+
+        ESP_LOGW(TAG, "Botão de reset pressionado. Segure por 3 s ...");
+
+        bool reset_confirmed = true;
+
+        for(uint32_t reset_counter = 0; reset_counter < (RESET_HOLD_TIME_MS / 100); reset_counter++)
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+
+            if(gpio_get_level(GPIO_BTN_RESET) == 1)
+            {
+                ESP_LOGI(TAG, "Reset cancelado.");
+                reset_confirmed = false;
+                break;
+            }
+        }
+
+        if(reset_confirmed)
+        {
+            app_config_erase_all();
+            ESP_LOGI(TAG, "Reiniciado...");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
+static void app_config_init_reset_btn(void)
+{
+    gpio_config_t gpio_cfg =
+    {
+        .pin_bit_mask = (1ULL << GPIO_BTN_RESET),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
+    };
+
+    gpio_config(&gpio_cfg);
+
+    xTaskCreate(reset_button_task, "reset_button_task", 4096, NULL, 10, &reset_task_handle);
+
+    gpio_isr_handler_add(GPIO_BTN_RESET, reset_button_isr, NULL);
+}
 
 esp_err_t app_config_uart_load(sys_config_uart_t *uart_cfg)
 {
@@ -185,6 +263,36 @@ esp_err_t app_config_gpio_save(const sys_config_gpio_t *gpio_cfg)
     return err;
 }
 
+esp_err_t app_config_erase_all(void)
+{
+    nvs_handle_t nvs_handler;
+    esp_err_t err;
+
+    ESP_LOGW(TAG, "Iniciando processo de limpeza de configuração!");
+
+    err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao abrir chaves do NVS!");
+        nvs_close(nvs_handler);
+        return err;
+    }
+
+    err = nvs_erase_all(nvs_handler);
+    if(err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Erro ao apagar chaves do NVS!");
+        nvs_close(nvs_handler);
+        return err;
+    }
+
+    err = nvs_commit(nvs_handler);
+    nvs_close(nvs_handler);
+
+    ESP_LOGI(TAG, "Configuracoes apagadas com sucesso!");
+    return err;
+}
+
 void app_config_main(void)
 {
     ESP_LOGI(TAG, "Carregando configurações salvas...");
@@ -221,6 +329,8 @@ void app_config_main(void)
     }
     
     ESP_LOGI(TAG, "Configuracoes aplicadas com sucesso!");
+
+    app_config_init_reset_btn();
 }
 
 

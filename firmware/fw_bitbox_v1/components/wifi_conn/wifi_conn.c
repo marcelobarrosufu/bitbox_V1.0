@@ -590,28 +590,28 @@ static bool wifi_conn_init_sta(wifi_config_t *cfg)
 
     EventBits_t bits = xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
+    bool result = false;
+
     if (bits & WIFI_CONNECTED_BIT) 
     {
         ESP_LOGI(TAG, "Conectado à rede: %s", cfg->sta.ssid);
-        ESP_LOGI(TAG, "Senha inserida: %s", cfg->sta.password);
         wifi_init_done = true;
-
-        return wifi_init_done;
+        result = true;
     }
         
     else if (bits & WIFI_FAIL_BIT) 
     {
         ESP_LOGW(TAG, "Falha ao conectar à rede: %s", cfg->sta.ssid);
-        ESP_LOGI(TAG, "Senha inserida: %s", cfg->sta.password);
-
-        return false;
+        result = false;
     }
         
-    else 
+    if(wifi_event_group != NULL)
     {
-        ESP_LOGE(TAG, "Evento inesperado");
-        return false;
+        vEventGroupDelete(wifi_event_group);
+        wifi_event_group = NULL;
     }
+
+    return result;
 }
 
 static esp_err_t save_post_handler(httpd_req_t *req)
@@ -634,9 +634,6 @@ static esp_err_t save_post_handler(httpd_req_t *req)
     url_decode_inplace(netw_cfg.ssid);
     url_decode_inplace(netw_cfg.pass);
     url_decode_inplace(netw_cfg.broker);
-
-    ESP_LOGI(TAG, "SSID Inserido: %s", netw_cfg.ssid);
-    ESP_LOGI(TAG, "PASS Inserido: %s", netw_cfg.pass);
 
     app_config_netw_save(&netw_cfg);
 
@@ -665,7 +662,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
 
         else
         {
-            xEventGroupSetBits(wifi_event_group, WIFI_FAIL_BIT);
+            if(wifi_event_group != NULL)
+            {
+                xEventGroupSetBits(wifi_event_group, WIFI_FAIL_BIT);
+            }
         }
             
         ESP_LOGI(TAG, "Falha na Conexão Wi-Fi");
@@ -676,7 +676,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Conectado com IP: "IPSTR, IP2STR(&event->ip_info.ip));
         retry_num = 0;
-        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+
+        if(wifi_event_group != NULL)
+        {
+            xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        }
     }
 }   
 
@@ -868,8 +872,6 @@ bool wifi_conn_init(void)
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
-
-    gpio_install_isr_service(0);
 
     config_button_init();
 

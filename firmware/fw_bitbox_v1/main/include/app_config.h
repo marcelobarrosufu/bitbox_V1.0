@@ -46,5 +46,7 @@ typedef struct sys_config_netw_s
     XMACRO_SYS_CONFIG
 #undef X
 
+esp_err_t app_config_erase_all(void);
+
 void app_config_main(void);
 
