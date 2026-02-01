@@ -26,16 +26,16 @@ O firmware abstrai os pinos físicos do ESP32 através de "Índices Lógicos" (0
 
 | Índice Lógico | Pino Físico (ESP32) | Label na Placa | Notas |
 | :---: | :---: | :--- | :--- |
-| **0** | GPIO 1 | BOARD_1 | UART0 TX Padrão |
-| **1** | GPIO 2 | BOARD_2 | LED Onboard (Devkits) |
-| **2** | GPIO 3 | BOARD_3 | UART0 RX Padrão |
+| **0** | GPIO 1 | BOARD_1 | - |
+| **1** | GPIO 2 | BOARD_2 | - |
+| **2** | GPIO 3 | BOARD_3 | - |
 | **3** | GPIO 4 | BOARD_4 | - |
 | **4** | GPIO 5 | BOARD_5 | - |
 | **5** | GPIO 33 | BOARD_33 | - |
 | **6** | GPIO 34 | BOARD_34 | **Input Only** |
 | **7** | GPIO 35 | BOARD_35 | **Input Only** |
-| **8** | GPIO 37 | BOARD_37 | - |
-| **9** | GPIO 38 | BOARD_38 | - |
+| **8** | GPIO 36 | BOARD_36 | - |
+| **9** | GPIO 37 | BOARD_37 | - |
 
 ### 1.2. Botões de Sistema
 Interrupções (ISR) configuradas com Debounce e proteção `IRAM_ATTR`.
@@ -62,6 +62,7 @@ O sistema decide seu modo de operação baseado na existência de configuraçõe
     * Ativado via botões GPIO 41 ou 42.
     * Sobe um Access Point (AP).
     * Disponibiliza servidor Web para configuração.
+    * Também é possível realizar configuração de pinos via terminal com um script em python + arquivo .yaml.
 
 3.  **Factory Reset:**
     * Apaga todas as chaves da namespace `storage`.
