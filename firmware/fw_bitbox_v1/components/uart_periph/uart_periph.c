@@ -150,9 +150,12 @@ static void uart_record_data_task(void *arg)
     static uint8_t uart_byte;
     static sd_log_msg_t uart_raw_data[UART_NUM_MAX] = { 0 };
 
+    bool activity_detected = false;
+
     while (1)
     {
         int64_t now = esp_timer_get_time();
+        activity_detected = false;
 
         for (uart_port_t uart_num = UART_NUM_0; uart_num < UART_NUM_MAX; uart_num++)
         {
@@ -165,6 +168,8 @@ static void uart_record_data_task(void *arg)
 
             while (utl_cbf_bytes_available(uart_circ_buffers[uart_num]))
             {
+                activity_detected = true;
+
                 utl_cbf_get(uart_circ_buffers[uart_num], &uart_byte);
 
                 if (uart_byte != 0x00)
@@ -197,7 +202,16 @@ static void uart_record_data_task(void *arg)
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(UART_POLL_INTERVAL_MS));
+        if(activity_detected)
+        {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+
+        else
+        {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        
     }
 }
 
@@ -280,6 +294,7 @@ int uart_periph_write_data(int uart_num, const void *src, size_t size)
 
 bool uart_periph_driver_init(void)
 {
+    esp_log_level_set(TAG, ESP_LOG_INFO);
     return true;
 }
 

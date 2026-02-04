@@ -7,12 +7,14 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#include "esp_log_level.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "embled_app.h"
 #include "nvs_flash.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_system.h"
 
 #include "sdmmc_storage.h"
@@ -39,6 +41,19 @@ static void app_init_periph(void);
 
 static void app_init_periph(void)
 {
+    esp_log_level_set("*", ESP_LOG_NONE);
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+// #if CONFIG_PM_ENABLE
+//     esp_pm_config_t pm_config = 
+//     {
+//         .max_freq_mhz = 160, 
+//         .min_freq_mhz = 160,  
+//         .light_sleep_enable = true
+//     };
+
+//     ESP_ERROR_CHECK(esp_pm_configure(&pm_config));
+//     ESP_LOGI(TAG, "Gerenciamente de energia ativado!");
+// #endif
 
     sdmmc_initialized = sdmmc_stor_init();
     uart_periph_initialized = uart_periph_driver_init();

@@ -4,6 +4,7 @@
 #include "esp_err.h"
 #include "esp_wifi_default.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "esp_netif.h"
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
@@ -64,6 +65,8 @@ static bool portal_running = false;
 static httpd_handle_t http_server = NULL;
 static esp_netif_t *wifi_ap_netif = NULL;
 static esp_netif_t *sta_netif = NULL;
+
+static SemaphoreHandle_t wifi_state_lock = NULL;
 
 static const char *html_gpio_page =
 "<!DOCTYPE html>"
@@ -316,31 +319,36 @@ static void config_task(void *arg)
         {
             continue;
         }
-
         last_button_tick = now;
 
-        if (portal_running) 
+        bool request_hw_portal = (notify & NOTIFY_BTN_HARDWARE) ? true : false;
+        ESP_LOGI(TAG, "Solicitação de Portal via Botão (%s)", request_hw_portal ? "Hardware" : "WiFi");
+
+        if(wifi_state_lock && xSemaphoreTake(wifi_state_lock, portMAX_DELAY))
         {
-            ESP_LOGW(TAG, "Portal já ativo");
-            continue;
+            if(!portal_running)
+            {
+                is_hw_portal = request_hw_portal;
+
+                xSemaphoreGive(wifi_state_lock);
+                wifi_start_captive_portal();
+            }
         }
 
-        if (notify & NOTIFY_BTN_WIFI)
+        else
         {
-            ESP_LOGI(TAG, "Botão WiFi pressionado!");
-            is_hw_portal = false;
-            wifi_start_captive_portal();
-        }
+            ESP_LOGI(TAG, "Portal já ativo. Renovando timer e atualizando contexto.");
 
-        else if (notify & NOTIFY_BTN_HARDWARE)
-        {
-            ESP_LOGI(TAG, "Botão HardWare pressionado!");
-            is_hw_portal = true;
-            wifi_start_captive_portal();
-        }
+            if(is_hw_portal != request_hw_portal)
+            {
+                is_hw_portal = request_hw_portal;
+                ESP_LOGI(TAG, "Contexto do portal alterado para: %s", is_hw_portal ? "Hardware" : "WiFi");
+            }
 
-        portal_running = true;
-        
+            start_portal_timeout();
+
+            xSemaphoreGive(wifi_state_lock);
+        }
     }
 }
 
@@ -588,6 +596,8 @@ static bool wifi_conn_init_sta(wifi_config_t *cfg)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+
     EventBits_t bits = xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
     bool result = false;
@@ -646,6 +656,11 @@ static esp_err_t save_post_handler(httpd_req_t *req)
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
+    if(portal_running)
+    {
+        return;
+    }
+
     if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
         esp_wifi_connect();
@@ -666,9 +681,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             {
                 xEventGroupSetBits(wifi_event_group, WIFI_FAIL_BIT);
             }
+
+            ESP_LOGW(TAG, "Falha na Conexão Wi-Fi: Máximo de tentativas atingido");
         }
-            
-        ESP_LOGI(TAG, "Falha na Conexão Wi-Fi");
     }
     
     else if(event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
@@ -835,18 +850,27 @@ static void wifi_init_ap(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
 }
 
 void wifi_start_captive_portal(void)
 {
+    if(wifi_state_lock)
+    {
+        xSemaphoreTake(wifi_state_lock, portMAX_DELAY);
+    }
+
     ESP_LOGI(TAG, "Iniciando captive portal...");
 
     portal_running = true;
+    retry_num = 0;
 
     mqtt_deinit_app();
-    wifi_dns_stop();
 
-    if (http_server) {
+    wifi_dns_stop();
+    if (http_server) 
+    {
         httpd_stop(http_server);
         http_server = NULL;
     }
@@ -857,10 +881,19 @@ void wifi_start_captive_portal(void)
 
     start_portal_timeout();
     ESP_LOGI(TAG, "Captive portal ativo em http://192.168.4.1");
+
+    if(wifi_state_lock)
+    {
+        xSemaphoreGive(wifi_state_lock);
+    }
 }
 
 bool wifi_conn_init(void)
 {
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+
+    wifi_state_lock = xSemaphoreCreateMutex();
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 

@@ -346,6 +346,8 @@ void mqtt_deinit_app(void)
 
 void mqtt_main_app(void)
 {
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+    
     const esp_mqtt_client_config_t mqtt_cfg =
     {
         .broker.address.uri = MQTT_BROKER_URL,

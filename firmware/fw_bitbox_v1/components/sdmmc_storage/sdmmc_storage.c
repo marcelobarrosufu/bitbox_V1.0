@@ -64,8 +64,6 @@ static bool sdmmc_mount_device(void)
 
     ESP_LOGI(TAG, "SD card mounted. Type: %s", card->cid.name);
 
-    sdmmc_card_print_info(stdout, card);
-
     FILE* test_file = fopen(MOUNT_POINT"/test.txt", "w");
     if(test_file == NULL) 
     {
@@ -111,6 +109,8 @@ static bool sdmmc_stor_get_log_name(char *output_name, size_t len)
 
 bool sdmmc_stor_init(void)
 {
+    esp_log_level_set(TAG, ESP_LOG_INFO);
+
     sdmmc_cfg_host();
     if(!sdmmc_mount_device())
     {

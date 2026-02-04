@@ -295,6 +295,7 @@ esp_err_t app_config_erase_all(void)
 
 void app_config_main(void)
 {
+    esp_log_level_set(TAG, ESP_LOG_INFO);
     ESP_LOGI(TAG, "Carregando configurações salvas...");
 
     sys_config_uart_t uart_cfg = {0};
