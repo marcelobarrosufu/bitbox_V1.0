@@ -24,18 +24,18 @@ Este documento detalha a operação, configuração, protocolos de comunicação
 ### 1.1. Mapeamento de GPIOs
 O firmware abstrai os pinos físicos do ESP32 através de "Índices Lógicos" (0 a 9) para facilitar a configuração remota.
 
-| Índice Lógico | Pino Físico (ESP32) | Label na Placa | Notas |
+| Índice Lógico | Pino Físico (ESP32) | Label na Placa |
 | :---: | :---: | :--- | :--- |
-| **0** | GPIO 1 | BOARD_1 | - |
-| **1** | GPIO 2 | BOARD_2 | - |
-| **2** | GPIO 3 | BOARD_3 | - |
-| **3** | GPIO 4 | BOARD_4 | - |
-| **4** | GPIO 5 | BOARD_5 | - |
-| **5** | GPIO 33 | BOARD_33 | - |
-| **6** | GPIO 34 | BOARD_34 | **Input Only** |
-| **7** | GPIO 35 | BOARD_35 | **Input Only** |
-| **8** | GPIO 36 | BOARD_36 | - |
-| **9** | GPIO 37 | BOARD_37 | - |
+| **0** | GPIO 1 | BOARD_1 | 
+| **1** | GPIO 2 | BOARD_2 |
+| **2** | GPIO 3 | BOARD_3 |
+| **3** | GPIO 4 | BOARD_4 |
+| **4** | GPIO 5 | BOARD_5 |
+| **5** | GPIO 33 | BOARD_33 |
+| **6** | GPIO 34 | BOARD_34 |
+| **7** | GPIO 35 | BOARD_35 |
+| **8** | GPIO 36 | BOARD_36 |
+| **9** | GPIO 37 | BOARD_37 |
 
 ### 1.2. Botões de Sistema
 Interrupções (ISR) configuradas com Debounce e proteção `IRAM_ATTR`.
@@ -107,7 +107,7 @@ O dispositivo envia dados binários para otimizar largura de banda.
 
 | Periférico | Tópico | Estrutura do Payload (Binário) |
 | :--- | :--- | :--- |
-| **UART** | `datalogger/uart/{N}` | `[Time(8B)]` + `[Payload]` + `[\0]` |
+| **UART** | `datalogger/uart/{N}` | `[Time(8B)]` + `[Payload]` + `[\0] ou [\n] ou [\r]` |
 | **GPIO** | `datalogger/gpio/{N}` | `[Time(8B)]` + `[Edge(1B)]` + `[Level(1B)]` |
 
 * **Time:** `uint64_t` (microssegundos desde o boot).
@@ -160,7 +160,7 @@ Os logs são salvos em formato binário proprietário para máxima velocidade e 
 2.  **Dados UART (Variável):**
     * `Length` (2B): `uint16_t` tamanho do payload.
     * `Payload` (N Bytes): Dados brutos.
-    * `Terminator` (1B): `0x00`.
+    * `Terminator` (1B): `\0`, `\n`, `\r`
 
 3.  **Dados GPIO (2 Bytes):**
     * `Edge` (1B): Borda detectada.
