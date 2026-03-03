@@ -48,6 +48,8 @@ Interrupções (ISR) configuradas com Debounce e proteção `IRAM_ATTR`.
 
 ---
 
+Existe ainda uma chave geral para ligar o dispositivo, indicada como SW2 na placa. A posição de ligada é levando a chave para o lado do conector SD.
+
 ## 2. Modos de Operação e Boot
 
 O sistema decide seu modo de operação baseado na existência de configurações na NVS (Non-Volatile Storage) e no estado dos botões.
