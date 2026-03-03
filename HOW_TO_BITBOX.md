@@ -25,7 +25,7 @@ Este documento detalha a operação, configuração, protocolos de comunicação
 O firmware abstrai os pinos físicos do ESP32 através de "Índices Lógicos" (0 a 9) para facilitar a configuração remota.
 
 | Índice Lógico | Pino Físico (ESP32) | Label na Placa |
-| :---: | :---: | :--- | :--- |
+| :---: | :---: | :--- | 
 | **0** | GPIO 1 | BOARD_1 | 
 | **1** | GPIO 2 | BOARD_2 |
 | **2** | GPIO 3 | BOARD_3 |
